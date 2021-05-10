@@ -73,7 +73,14 @@ def load_blender_data(basedir, half_res=False, testskip=1):
     focal = .5 * W / np.tan(.5 * camera_angle_x)
     
     render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180,180,40+1)[:-1]], 0)
-    
+    # --- @mst
+    # print(render_poses.shape) # shape [40, 4, 4]
+    # print(f'H, W: {H, W}') # H, W: (800, 800)
+    # print([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180,180,40+1)[:-1]])
+    # print(f'focal: {focal}') # focal: 1111.1110311937682
+    # exit() 
+    # --- @mst
+
     if half_res:
         H = H//2
         W = W//2
