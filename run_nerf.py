@@ -57,8 +57,6 @@ def batchify_rays(rays_flat, chunk=1024*32, **kwargs):
     """
     all_ret = {}
     for i in range(0, rays_flat.shape[0], chunk):
-        print(chunk)
-        exit()
         ret = render_rays(rays_flat[i:i+chunk], **kwargs)
         for k in ret:
             if k not in all_ret:
@@ -134,7 +132,7 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
 
     near, far = near * torch.ones_like(rays_d[...,:1]), far * torch.ones_like(rays_d[...,:1])
     rays = torch.cat([rays_o, rays_d, near, far], -1)
-    print(f'rays shape {rays.shape}') # @mst: rays shape torch.Size([160000, 8])
+    # print(f'rays shape {rays.shape}') # @mst: rays shape torch.Size([160000, 8])
 
     if use_viewdirs:
         rays = torch.cat([rays, viewdirs], -1)
@@ -432,10 +430,10 @@ def render_rays(ray_batch,
     # when training: [1024, 1, 3] + [1024, 1, 3] * [1024, 64, 1]
     # rays_d range: [-1, 1]
     # --- @mst
-    print(f'rays_o[...,None,:] shape: {(rays_o[...,None,:]).shape}') # shape: torch.Size([32768, 1, 3])
-    print(f'rays_d[...,None,:] shape: {(rays_d[...,None,:]).shape}') # shape: torch.Size([32768, 1, 3])
-    print(f'z_vals[...,:,None] shape: {(z_vals[...,:,None]).shape}') # shape: torch.Size([32768, 64, 1])
-    print(f'               pts shape: {pts.shape}') # shape: torch.Size([32768, 64, 3])
+    # print(f'rays_o[...,None,:] shape: {(rays_o[...,None,:]).shape}') # shape: torch.Size([32768, 1, 3])
+    # print(f'rays_d[...,None,:] shape: {(rays_d[...,None,:]).shape}') # shape: torch.Size([32768, 1, 3])
+    # print(f'z_vals[...,:,None] shape: {(z_vals[...,:,None]).shape}') # shape: torch.Size([32768, 64, 1])
+    # print(f'               pts shape: {pts.shape}') # shape: torch.Size([32768, 64, 3])
     # ---
 
 #     raw = run_network(pts)
@@ -883,7 +881,9 @@ def train():
 
     
         if i%args.i_print==0:
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
+            logstr = f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}"
+            tqdm.write(logstr)
+            print(logstr)
         """
             print(expname, i, psnr.numpy(), loss.numpy(), global_step.numpy())
             print('iter time {:.05f}'.format(dt))
