@@ -597,6 +597,7 @@ def config_parser():
 
 # @mst: ---------------------
 from logger import Logger
+from utils import Timer
 # ---------------------------
 
 def train():
@@ -763,6 +764,7 @@ def train():
     # writer = SummaryWriter(os.path.join(basedir, 'summaries', expname))
     
     start = start + 1
+    timer = Timer((N_iters - start) / args.i_print)
     for i in trange(start, N_iters):
         time0 = time.time()
 
@@ -884,6 +886,7 @@ def train():
             logstr = f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}"
             tqdm.write(logstr)
             print(logstr)
+            print('Predicted finish time: %s' % timer())
         """
             print(expname, i, psnr.numpy(), loss.numpy(), global_step.numpy())
             print('iter time {:.05f}'.format(dt))
