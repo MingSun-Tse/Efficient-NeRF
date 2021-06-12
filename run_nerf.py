@@ -57,7 +57,7 @@ def batchify_rays(rays_flat, chunk=1024*32, **kwargs):
     """
     all_ret = {}
     for i in range(0, rays_flat.shape[0], chunk):
-        ret = render_rays(rays_flat[i:i+chunk], **kwargs)
+        ret = render_rays(rays_flat[i:i+chunk], **kwargs) # @mst: train, rays_flat.shape(0) = 1024, chunk = 32768
         for k in ret:
             if k not in all_ret:
                 all_ret[k] = []
@@ -97,6 +97,7 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
         # special case to render full image
         rays_o, rays_d = get_rays(H, W, focal, c2w)
     else:
+        # @mst: training, choose this way
         # use provided ray batch
         rays_o, rays_d = rays
     # print(f'rays_o shape {rays_o.shape}') # train: 1024
@@ -104,7 +105,6 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
 
     # --- @mst
     # rays are meshgrid
-    # why 400x400? 
     # elements in rays_o are all the same!
     # print(f'rays_o: {rays_o}')
     # print(f'rays_d: {rays_d}')
@@ -127,7 +127,7 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
         rays_o, rays_d = ndc_rays(H, W, focal, 1., rays_o, rays_d)
 
     # Create ray batch
-    rays_o = torch.reshape(rays_o, [-1,3]).float() # @mst: [160000, 3], 400*400
+    rays_o = torch.reshape(rays_o, [-1,3]).float() # @mst: test: [160000, 3], 400*400; train: [1024, 3]
     rays_d = torch.reshape(rays_d, [-1,3]).float()
 
     near, far = near * torch.ones_like(rays_d[...,:1]), far * torch.ones_like(rays_d[...,:1])
@@ -448,7 +448,7 @@ def render_rays(ray_batch,
         z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
         z_samples = z_samples.detach()
 
-        z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
+        z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1) # @mst: why sort?
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples + N_importance, 3]
 
         run_fn = network_fn if network_fine is None else network_fine
