@@ -223,6 +223,7 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
 
     # Invert CDF
     u = u.contiguous()
+    # cdf, u = cdf.cpu(), u.cpu() # @mst: searchsorted GPU does not work on aws for now, so use cpu()
     inds = searchsorted(cdf, u, side='right')
     below = torch.max(torch.zeros_like(inds-1), inds-1)
     above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
