@@ -205,11 +205,11 @@ def render_path(model, render_poses, hwf, chunk, render_kwargs, gt_imgs=None, sa
     return rgbs, disps
 
 
-def create_nerf(args):
+def create_nerf(args, near, far):
     """Instantiate NeRF's MLP model.
     """
     # set up model
-    model = NeRF_v2(args).to(device)
+    model = NeRF_v2(args, near, far).to(device)
     grad_vars = list(model.parameters())
 
     # set up optimizer
@@ -527,7 +527,8 @@ def train():
             file.write(open(args.config, 'r').read())
 
     # Create nerf model
-    model, optimizer, start, render_kwargs_train, render_kwargs_test,  = create_nerf(args)
+    near, far = 2, 6
+    model, optimizer, start, render_kwargs_train, render_kwargs_test,  = create_nerf(args, near, far)
 
     bds_dict = {
         'near' : near,
@@ -636,7 +637,7 @@ def train():
                 else:
                     coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W)), -1)  # (H, W, 2)
 
-                coords = torch.reshape(coords, [-1,2])  # (H * W, 2)
+                coords = torch.reshape(coords, [-1, 2])  # (H * W, 2)
                 select_inds = np.random.choice(coords.shape[0], size=[N_rand], replace=False)  # (N_rand,)
                 select_coords = coords[select_inds].long()  # (N_rand, 2)
                 rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
@@ -645,10 +646,13 @@ def train():
                 target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
             
             rgb, disp, acc, weights, depth = model(rays_o, rays_d)
-            loss = F.mse_loss(rgb, target_s) # img2mse(rgb, target_s) 
-            # @mst: By observation, img2mse can throw an error: RuntimeError: Function 'PowBackward0' returned nan values in its 0th output.
-            optimizer.zero_grad()
-            loss.backward()
+            try:
+                loss = img2mse(rgb, target_s) # F.mse_loss(rgb, target_s)
+                optimizer.zero_grad()
+                loss.backward()
+            except:
+                print(rgb.mean(), target_s.mean(), loss)
+                exit()
             optimizer.step()
 
         # print logs of training

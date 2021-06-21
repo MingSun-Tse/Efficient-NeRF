@@ -112,9 +112,11 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
 class NeRF_v2(nn.Module):
     '''New idea: one forward to get multi-outputs.
     '''
-    def __init__(self, args):
+    def __init__(self, args, near, far):
         super(NeRF_v2, self).__init__()
         self.args = args
+        self.near = near
+        self.far = far
         D, W = args.netdepth, args.netwidth
         self.skips = [int(x) for x in args.skips.split(',')]
 
@@ -127,14 +129,14 @@ class NeRF_v2(nn.Module):
         n_sample_per_ray, D_head = args.n_sample_per_ray, args.D_head
         dim_in = input_ch + input_ch_views if args.use_encoding_for_input else 6 # 6: postion 3 + pose 3
         if D_head == 1:
-            head = [nn.Linear(dim_in, n_sample_per_ray), nn.ReLU()]
+            head = [nn.Linear(dim_in, n_sample_per_ray), nn.Sigmoid()]
         elif D_head == 2:
-            head = [nn.Linear(dim_in, W), nn.ReLU(), nn.Linear(W, n_sample_per_ray), nn.ReLU()]
+            head = [nn.Linear(dim_in, W), nn.ReLU(), nn.Linear(W, n_sample_per_ray), nn.Sigmoid()]
         else:
             head = [nn.Linear(dim_in, W), nn.ReLU()]
             for _ in range(D_head - 2):
                 head += [nn.Linear(W, W), nn.ReLU()]
-            head += [nn.Linear(W, n_sample_per_ray), nn.ReLU()]
+            head += [nn.Linear(W, n_sample_per_ray), nn.Sigmoid()]
         self.head = nn.Sequential(*head)
 
         # body network
@@ -157,17 +159,27 @@ class NeRF_v2(nn.Module):
             self.output_linear = nn.Linear(W, output_ch)
 
     def forward(self, rays_o, rays_d):
-        # set up input
-        input = torch.cat([rays_o, rays_d], dim=-1) # [n_ray, 6]
-        if self.args.use_encoding_for_input:
-            embedded_rays_o = self.embed_fn(rays_o)
-            embedded_rays_d = self.embeddirs_fn(rays_d)
-            input = torch.cat([embedded_rays_o, embedded_rays_d], dim=-1) # [n_ray, 90]
+        n_ray = rays_o.size(0)
+        n_sample = self.args.n_sample_per_ray
 
         # predict depth of sampled points
-        z_vals = self.head(input) # depth, [n_ray, n_sample_per_ray]
+        if self.args.learn_pts:
+            # set up input
+            input = torch.cat([rays_o, rays_d], dim=-1) # [n_ray, 6]
+            if self.args.use_encoding_for_input:
+                embedded_rays_o = self.embed_fn(rays_o)
+                embedded_rays_d = self.embeddirs_fn(rays_d)
+                input = torch.cat([embedded_rays_o, embedded_rays_d], dim=-1) # [n_ray, 90]
+            
+            # get sample depths
+            t_vals = self.head(input)
+            z_vals = self.near * (1 - t_vals) + self.far * t_vals # depth, [n_ray, n_sample_per_ray]
+        else:
+            t_vals = torch.linspace(0., 1., steps=n_sample)
+            t_vals = t_vals[None, :].expand(n_ray, n_sample)
+            z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
         
-        # get sampled points
+        # get sample coordinates
         pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample_per_ray, 3]
         
         # positional embedding

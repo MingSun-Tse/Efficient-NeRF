@@ -120,5 +120,7 @@ parser.add_argument('--use_encoding_for_input', action='store_true')
 parser.add_argument('--pretrained_ckpt', type=str, default='')
 parser.add_argument('--resume', action="store_true", 
         help='if True, resume the optimizer')
+parser.add_argument('--learn_pts', action="store_true", 
+        help='if True, learn sampling positions')
 
 args = parser.parse_args()
