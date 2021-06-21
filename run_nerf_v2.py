@@ -781,7 +781,8 @@ def train():
                 target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
             
             rgb, disp, acc, weights, depth = model(rays_o, rays_d)
-            loss = img2mse(rgb, target_s).abs()
+            loss = F.mse_loss(rgb, target_s) # img2mse(rgb, target_s) 
+            # @mst: By observation, img2mse can throw an error: RuntimeError: Function 'PowBackward0' returned nan values in its 0th output.
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
