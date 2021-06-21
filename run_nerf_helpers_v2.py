@@ -7,7 +7,6 @@ import numpy as np
 # TODO: remove this dependency
 from torchsearchsorted import searchsorted
 
-
 # Misc
 img2mse = lambda x, y : torch.mean((x - y) ** 2)
 mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
@@ -64,25 +63,91 @@ def get_embedder(multires, i=0):
     embed = lambda x, eo=embedder_obj : eo.embed(x)
     return embed, embedder_obj.out_dim
 
+def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False):
+    """Transforms model's predictions to semantically meaningful values.
+    Args:
+        raw: [num_rays, num_samples along ray, 4]. Prediction from model.
+        z_vals: [num_rays, num_samples along ray]. Integration time.
+        rays_d: [num_rays, 3]. Direction of each ray.
+    Returns:
+        rgb_map: [num_rays, 3]. Estimated RGB color of a ray.
+        disp_map: [num_rays]. Disparity map. Inverse of depth map.
+        acc_map: [num_rays]. Sum of weights along each ray.
+        weights: [num_rays, num_samples]. Weights assigned to each sampled color.
+        depth_map: [num_rays]. Estimated distance to object.
+    """
+    raw2alpha = lambda raw, dists, act_fn=F.relu: 1.-torch.exp(-act_fn(raw)*dists) # @mst: opacity
 
-# Model
-class NeRF(nn.Module):
-    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, output_ch=4, skips=[4], use_viewdirs=False):
+    dists = z_vals[...,1:] - z_vals[...,:-1] # dists for 'distances'
+    dists = torch.cat([dists, torch.Tensor([1e10]).expand(dists[...,:1].shape)], -1)  # [N_rays, N_samples]
+    # @mst: 1e10 for infinite distance
+
+    dists = dists * torch.norm(rays_d[...,None,:], dim=-1) # @mst: direction vector needs normalization. why this * ?
+
+    rgb = torch.sigmoid(raw[...,:3])  # [N_rays, N_samples, 3], RGB for each sampled point 
+    noise = 0.
+    if raw_noise_std > 0.:
+        noise = torch.randn(raw[...,3].shape) * raw_noise_std
+
+        # Overwrite randomly sampled data if pytest
+        if pytest:
+            np.random.seed(0)
+            noise = np.random.rand(*list(raw[...,3].shape)) * raw_noise_std
+            noise = torch.Tensor(noise)
+
+    alpha = raw2alpha(raw[...,3] + noise, dists)  # [N_rays, N_samples]
+    # weights = alpha * tf.math.cumprod(1.-alpha + 1e-10, -1, exclusive=True)
+    weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)), 1.-alpha + 1e-10], -1), -1)[:, :-1] # @mst: [N_rays, N_samples]
+    rgb_map = torch.sum(weights[...,None] * rgb, -2)  # [N_rays, 3]
+
+    depth_map = torch.sum(weights * z_vals, -1)
+    disp_map = 1./torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))
+    acc_map = torch.sum(weights, -1)
+
+    if white_bkgd:
+        rgb_map = rgb_map + (1.-acc_map[...,None])
+
+    return rgb_map, disp_map, acc_map, weights, depth_map
+
+class NeRF_v2(nn.Module):
+    def __init__(self, args, D=8, W=256, input_ch=3, input_ch_views=3, output_ch=4, skips=[4], use_viewdirs=False):
         """ 
         """
-        super(NeRF, self).__init__()
+        super(NeRF_v2, self).__init__()
+        self.args = args
         self.D = D
         self.W = W
         self.input_ch = input_ch
         self.input_ch_views = input_ch_views
         self.skips = skips
         self.use_viewdirs = use_viewdirs
-        
+
+        # head network, get predicted sampled points
+        dim_in = 6 # could use positional encoding for input
+        n_sample_per_ray = 192
+        D_head = 4
+        if D_head == 1:
+            head = [nn.Linear(dim_in, n_sample_per_ray), nn.ReLU()]
+        elif D_head == 2:
+            head = [nn.Linear(dim_in, W), nn.ReLU(), nn.Linear(W, n_sample_per_ray), nn.ReLU()]
+        else:
+            head = [nn.Linear(dim_in, W), nn.ReLU()]
+            for _ in range(D_head - 2):
+                head += [nn.Linear(W, W), nn.ReLU()]
+            head += [nn.Linear(W, n_sample_per_ray), nn.ReLU()]
+        self.head = nn.Sequential(*head)
+
+        # positional embedding function
+        self.embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
+        if args.use_viewdirs:
+            self.embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
+
+        # body network
         self.pts_linears = nn.ModuleList(
-            [nn.Linear(input_ch, W)] + [nn.Linear(W, W) if i not in self.skips else nn.Linear(W + input_ch, W) for i in range(D-1)])
+            [nn.Linear(input_ch * n_sample_per_ray, W)] + [nn.Linear(W, W) if i not in self.skips else nn.Linear(W + input_ch * n_sample_per_ray, W) for i in range(D-1)])
         
         ### Implementation according to the official code release (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
-        self.views_linears = nn.ModuleList([nn.Linear(input_ch_views + W, W//2)])
+        self.views_linears = nn.ModuleList([nn.Linear(input_ch_views * n_sample_per_ray + W, W//2)])
 
         ### Implementation according to the paper
         # self.views_linears = nn.ModuleList(
@@ -90,65 +155,57 @@ class NeRF(nn.Module):
         
         if use_viewdirs:
             self.feature_linear = nn.Linear(W, W)
-            self.alpha_linear = nn.Linear(W, 1)
-            self.rgb_linear = nn.Linear(W//2, 3)
+            self.alpha_linear = nn.Linear(W, n_sample_per_ray)
+            self.rgb_linear = nn.Linear(W//2, 3*n_sample_per_ray)
         else:
             self.output_linear = nn.Linear(W, output_ch)
 
-    def forward(self, x):
-        input_pts, input_views = torch.split(x, [self.input_ch, self.input_ch_views], dim=-1)
-        h = input_pts
-        for i, l in enumerate(self.pts_linears):
-            h = self.pts_linears[i](h)
-            h = F.relu(h)
-            if i in self.skips:
-                h = torch.cat([input_pts, h], -1)
+    def forward(self, rays_o, rays_d):
+        # positional embedding
+        input = torch.cat([rays_o, rays_d], dim=1) # [n_ray, 6]
+        z_vals = self.head(input) # depth, [n_ray, n_sample_per_ray]
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample_per_ray, 3]
+        embedded_pts = self.embed_fn(pts.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
+        embedded_pts = embedded_pts.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray * 63]
+        
+        # pose embedding
+        if self.args.use_viewdirs:
+            # provide ray directions as input
+            viewdirs = rays_d
+            # if c2w_staticcam is not None:
+            #     # special case to visualize effect of viewdirs
+            #     rays_o, rays_d = get_rays(H, W, focal, c2w_staticcam)
+            viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True) # @mst: 'rays_d' is real-world data, needs normalization.
+            viewdirs = torch.reshape(viewdirs, [-1, 3]).float() # [n_ray, 3]
+            dirs = viewdirs[:, None].expand(pts.shape) # [n_ray, 3] -> [n_ray, n_sample_per_ray, 3]
+            dirs = torch.reshape(dirs, (-1, 3))
+            embedded_dirs = self.embeddirs_fn(dirs)
+            embedded_dirs = embedded_dirs.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray * 27]
 
+        # body network
+        h = embedded_pts
+        for i, layer in enumerate(self.pts_linears):
+            h = F.relu(layer(h))
+            if i in self.skips:
+                h = torch.cat([embedded_pts, h], dim=-1)
+        
+        # get raw outputs
         if self.use_viewdirs:
-            alpha = self.alpha_linear(h)
+            alpha = self.alpha_linear(h) # [n_ray, n_sample_per_ray]
             feature = self.feature_linear(h)
-            h = torch.cat([feature, input_views], -1)
+            h = torch.cat([feature, embedded_dirs], -1)
         
             for i, l in enumerate(self.views_linears):
                 h = self.views_linears[i](h)
                 h = F.relu(h)
 
             rgb = self.rgb_linear(h)
-            outputs = torch.cat([rgb, alpha], -1)
-        else:
-            outputs = self.output_linear(h)
+            raw = torch.cat([rgb, alpha], dim=-1) # [n_ray, n_sample_per_ray * 4]
 
-        return outputs    
-
-    def load_weights_from_keras(self, weights):
-        assert self.use_viewdirs, "Not implemented if use_viewdirs=False"
-        
-        # Load pts_linears
-        for i in range(self.D):
-            idx_pts_linears = 2 * i
-            self.pts_linears[i].weight.data = torch.from_numpy(np.transpose(weights[idx_pts_linears]))    
-            self.pts_linears[i].bias.data = torch.from_numpy(np.transpose(weights[idx_pts_linears+1]))
-        
-        # Load feature_linear
-        idx_feature_linear = 2 * self.D
-        self.feature_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_feature_linear]))
-        self.feature_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_feature_linear+1]))
-
-        # Load views_linears
-        idx_views_linears = 2 * self.D + 2
-        self.views_linears[0].weight.data = torch.from_numpy(np.transpose(weights[idx_views_linears]))
-        self.views_linears[0].bias.data = torch.from_numpy(np.transpose(weights[idx_views_linears+1]))
-
-        # Load rgb_linear
-        idx_rbg_linear = 2 * self.D + 4
-        self.rgb_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear]))
-        self.rgb_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear+1]))
-
-        # Load alpha_linear
-        idx_alpha_linear = 2 * self.D + 6
-        self.alpha_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear]))
-        self.alpha_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear+1]))
-
+        # rendering equation
+        raw = raw.view(raw.size(0), -1, 4)
+        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False)
+        return rgb_map, disp_map, acc_map, weights, depth_map
 
 # Ray helpers
 def get_rays(H, W, focal, c2w):

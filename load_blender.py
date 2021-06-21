@@ -54,6 +54,7 @@ def load_blender_data(basedir, half_res=False, testskip=1):
             skip = testskip
             
         for frame in meta['frames'][::skip]:
+            # print(frame.keys()) # frame keys: file_path, rotation, transform_matrix
             fname = os.path.join(basedir, frame['file_path'] + '.png')
             imgs.append(imageio.imread(fname))
             poses.append(np.array(frame['transform_matrix']))
