@@ -110,22 +110,22 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     return rgb_map, disp_map, acc_map, weights, depth_map
 
 class NeRF_v2(nn.Module):
-    def __init__(self, args, D=8, W=256, input_ch=3, input_ch_views=3, output_ch=4, skips=[4], use_viewdirs=False):
-        """ 
-        """
+    '''New idea: one forward to get multi-outputs.
+    '''
+    def __init__(self, args):
         super(NeRF_v2, self).__init__()
         self.args = args
-        self.D = D
-        self.W = W
-        self.input_ch = input_ch
-        self.input_ch_views = input_ch_views
-        self.skips = skips
-        self.use_viewdirs = use_viewdirs
+        D, W = args.netdepth, args.netwidth
+        self.skips = [int(x) for x in args.skips.split(',')]
+
+        # positional embedding function
+        self.embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
+        if args.use_viewdirs:
+            self.embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
 
         # head network, get predicted sampled points
-        dim_in = 6 # could use positional encoding for input
-        n_sample_per_ray = 192
-        D_head = 4
+        n_sample_per_ray, D_head = args.n_sample_per_ray, args.D_head
+        dim_in = input_ch + input_ch_views if args.use_encoding_for_input else 6 # 6: postion 3 + pose 3
         if D_head == 1:
             head = [nn.Linear(dim_in, n_sample_per_ray), nn.ReLU()]
         elif D_head == 2:
@@ -136,11 +136,6 @@ class NeRF_v2(nn.Module):
                 head += [nn.Linear(W, W), nn.ReLU()]
             head += [nn.Linear(W, n_sample_per_ray), nn.ReLU()]
         self.head = nn.Sequential(*head)
-
-        # positional embedding function
-        self.embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
-        if args.use_viewdirs:
-            self.embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
 
         # body network
         self.pts_linears = nn.ModuleList(
@@ -153,18 +148,29 @@ class NeRF_v2(nn.Module):
         # self.views_linears = nn.ModuleList(
         #     [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2, W//2) for i in range(D//2)])
         
-        if use_viewdirs:
+        if args.use_viewdirs:
             self.feature_linear = nn.Linear(W, W)
             self.alpha_linear = nn.Linear(W, n_sample_per_ray)
-            self.rgb_linear = nn.Linear(W//2, 3*n_sample_per_ray)
+            self.rgb_linear = nn.Linear(W//2, 3 * n_sample_per_ray)
         else:
+            output_ch = 5 if args.N_importance > 0 else 4
             self.output_linear = nn.Linear(W, output_ch)
 
     def forward(self, rays_o, rays_d):
-        # positional embedding
-        input = torch.cat([rays_o, rays_d], dim=1) # [n_ray, 6]
+        # set up input
+        input = torch.cat([rays_o, rays_d], dim=-1) # [n_ray, 6]
+        if self.args.use_encoding_for_input:
+            embedded_rays_o = self.embed_fn(rays_o)
+            embedded_rays_d = self.embeddirs_fn(rays_d)
+            input = torch.cat([embedded_rays_o, embedded_rays_d], dim=-1) # [n_ray, 90]
+
+        # predict depth of sampled points
         z_vals = self.head(input) # depth, [n_ray, n_sample_per_ray]
+        
+        # get sampled points
         pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample_per_ray, 3]
+        
+        # positional embedding
         embedded_pts = self.embed_fn(pts.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
         embedded_pts = embedded_pts.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray * 63]
         
@@ -190,7 +196,7 @@ class NeRF_v2(nn.Module):
                 h = torch.cat([embedded_pts, h], dim=-1)
         
         # get raw outputs
-        if self.use_viewdirs:
+        if self.args.use_viewdirs:
             alpha = self.alpha_linear(h) # [n_ray, n_sample_per_ray]
             feature = self.feature_linear(h)
             h = torch.cat([feature, embedded_dirs], -1)

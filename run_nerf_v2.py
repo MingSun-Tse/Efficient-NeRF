@@ -208,18 +208,8 @@ def render_path(model, render_poses, hwf, chunk, render_kwargs, gt_imgs=None, sa
 def create_nerf(args):
     """Instantiate NeRF's MLP model.
     """
-    input_ch_views = 0
-    embeddirs_fn = None
-    if args.use_viewdirs:
-        embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
-    output_ch = 5 if args.N_importance > 0 else 4
-    skips = [4] # @mst: the layer where a skip connection is added
-    
     # ********************************************************************
-    input_ch = 3
-    model = NeRF_v2(args, D=args.netdepth, W=args.netwidth,
-                 input_ch=input_ch, output_ch=output_ch, skips=skips,
-                 input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
+    model = NeRF_v2(args).to(device)
     grad_vars = list(model.parameters())
     # ********************************************************************
 
@@ -566,11 +556,12 @@ def config_parser():
     parser.add_argument('--project_name', type=str, default="")
     parser.add_argument('--debug', action="store_true")
     parser.add_argument('--screen_print', action="store_true")
-    parser.add_argument('--note', type=str, default='', help='experiment note')
-    parser.add_argument('--print_interval', type=int, default=100)
-    parser.add_argument('--test_interval', type=int, default=2000)
-    parser.add_argument('--plot_interval', type=int, default=100000000)
-    parser.add_argument('--save_interval', type=int, default=2000, help="the interval to save model")
+
+    # @mst: related to nerf_v2
+    parser.add_argument('--skips', type=str, default='4')
+    parser.add_argument('--D_head', type=int, default=4)
+    parser.add_argument('--n_sample_per_ray', type=int, default=192)
+    parser.add_argument('--use_encoding_for_input', action='store_true')
 
     return parser
 
@@ -580,16 +571,15 @@ from utils import Timer
 # ---------------------------
 
 def train():
-
     parser = config_parser()
     args = parser.parse_args()
 
     # @mst: add logs
     global logger; logger = Logger(args)
     global print; print = logger.log_printer.logprint
+    global accprint; accprint = logger.log_printer.accprint
 
     # Load data
-
     if args.dataset_type == 'llff':
         images, poses, bds, render_poses, i_test = load_llff_data(args.datadir, args.factor,
                                                                   recenter=True, bd_factor=.75,
@@ -791,8 +781,7 @@ def train():
                 target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
             
             rgb, disp, acc, weights, depth = model(rays_o, rays_d)
-            loss = img2mse(rgb, target_s)
-            psnr = mse2psnr(loss)
+            loss = img2mse(rgb, target_s).abs()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -806,9 +795,10 @@ def train():
 
         # print logs of training
         if i % args.i_print == 0:
+            psnr = mse2psnr(loss)
             logstr = f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}"
             tqdm.write(logstr)
-            print(logstr)
+            accprint(logstr)
             print('Predicted finish time: %s' % timer())
 
         # validation: using the splitted test images
@@ -828,7 +818,7 @@ def train():
                 'optimizer_state_dict': optimizer.state_dict(),
             }, path)
             print('Saved checkpoints at', path)
-            
+
         # test: using novel poses 
         if i % args.i_video == 0 and i > 0:
             # Turn on testing mode
