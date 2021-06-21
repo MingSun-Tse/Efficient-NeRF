@@ -172,15 +172,17 @@ class NeRF_v2(nn.Module):
                 input = torch.cat([embedded_rays_o, embedded_rays_d], dim=-1) # [n_ray, 90]
             
             # get sample depths
-            t_vals = self.head(input)
-            z_vals = self.near * (1 - t_vals) + self.far * t_vals # depth, [n_ray, n_sample_per_ray]
+            intervals = self.head(input) # [n_sample]
+            t_vals = torch.cumsum(intervals) # make sure it is in ascending order
+            # t_vals = t_vals / t_vals.max() # to make sure it is in [0, 1]
+            z_vals = self.near * (1 - t_vals) + self.far * t_vals # depth, [n_ray, n_sample]
         else:
             t_vals = torch.linspace(0., 1., steps=n_sample)
             t_vals = t_vals[None, :].expand(n_ray, n_sample)
             z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
         
         # get sample coordinates
-        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample_per_ray, 3]
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, 3]
         
         # positional embedding
         embedded_pts = self.embed_fn(pts.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
