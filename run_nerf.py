@@ -162,16 +162,12 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     rgbs = []
     disps = []
 
-    t = time.time()
     for i, c2w in enumerate(tqdm(render_poses)):
-        # print(c2w.shape, render_poses.shape) # @mst: torch.Size([4, 4]) torch.Size([40, 4, 4])
-        print(i, time.time() - t)
-        t = time.time()
         rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)
         # --- @mst
-        print(f' rgb shape: {rgb.shape}')
-        print(f'disp shape: {disp.shape}')
-        print(f' acc shape: {acc.shape}')
+        # print(f' rgb shape: {rgb.shape}')
+        # print(f'disp shape: {disp.shape}')
+        # print(f' acc shape: {acc.shape}')
         # rgb shape: torch.Size([400, 400, 3])
         # disp shape: torch.Size([400, 400])
         # acc shape: torch.Size([400, 400])
@@ -608,9 +604,10 @@ def train():
     # @mst: add logs
     global logger; logger = Logger(args)
     global print; print = logger.log_printer.logprint
+    global accprint; accprint = logger.log_printer.accprint
+    global netprint; netprint = logger.log_printer.netprint
 
     # Load data
-
     if args.dataset_type == 'llff':
         images, poses, bds, render_poses, i_test = load_llff_data(args.datadir, args.factor,
                                                                   recenter=True, bd_factor=.75,
@@ -848,12 +845,14 @@ def train():
         # Rest is logging
         if i%args.i_weights==0:
             path = os.path.join(basedir, expname, '{:06d}.tar'.format(i))
-            torch.save({
+            to_save = {
                 'global_step': global_step,
                 'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
-                'network_fine_state_dict': render_kwargs_train['network_fine'].state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-            }, path)
+            }
+            if args.N_importance > 0:
+                to_save['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
+            torch.save(to_save, path)
             print('Saved checkpoints at', path)
 
         if i%args.i_video==0 and i > 0:
@@ -883,9 +882,8 @@ def train():
 
     
         if i%args.i_print==0:
-            logstr = f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}"
-            tqdm.write(logstr)
-            print(logstr)
+            logstr = f"[TRAIN] Iter {i:6d} Loss {loss.item():.6f}  PSNR {psnr.item():.4f} LR {new_lrate:.10f}"
+            accprint(logstr)
             print('Predicted finish time: %s' % timer())
         """
             print(expname, i, psnr.numpy(), loss.numpy(), global_step.numpy())
