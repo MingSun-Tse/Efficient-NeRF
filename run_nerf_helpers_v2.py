@@ -112,13 +112,14 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
 class NeRF_v2(nn.Module):
     '''New idea: one forward to get multi-outputs.
     '''
-    def __init__(self, args, near, far):
+    def __init__(self, args, near, far, print=print):
         super(NeRF_v2, self).__init__()
         self.args = args
         self.near = near
         self.far = far
         D, W = args.netdepth, args.netwidth
         self.skips = [int(x) for x in args.skips.split(',')]
+        self.print = print
 
         # positional embedding function
         self.embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
@@ -127,7 +128,7 @@ class NeRF_v2(nn.Module):
 
         # head network, get predicted sampled points
         n_sample_per_ray, D_head = args.n_sample_per_ray, args.D_head
-        dim_in = input_ch + input_ch_views if args.use_encoding_for_input else 6 # 6: postion 3 + pose 3
+        dim_in = input_ch + input_ch_views if args.encode_input else 6 # 6: postion 3 + pose 3
         if D_head == 1:
             head = [nn.Linear(dim_in, n_sample_per_ray), nn.Sigmoid()]
         elif D_head == 2:
@@ -158,7 +159,7 @@ class NeRF_v2(nn.Module):
             output_ch = 5 if args.N_importance > 0 else 4
             self.output_linear = nn.Linear(W, output_ch)
 
-    def forward(self, rays_o, rays_d):
+    def forward(self, rays_o, rays_d, global_step=-1):
         n_ray = rays_o.size(0)
         n_sample = self.args.n_sample_per_ray
 
@@ -166,15 +167,17 @@ class NeRF_v2(nn.Module):
         if self.args.learn_pts:
             # set up input
             input = torch.cat([rays_o, rays_d], dim=-1) # [n_ray, 6]
-            if self.args.use_encoding_for_input:
+            if self.args.encode_input:
                 embedded_rays_o = self.embed_fn(rays_o)
                 embedded_rays_d = self.embeddirs_fn(rays_d)
                 input = torch.cat([embedded_rays_o, embedded_rays_d], dim=-1) # [n_ray, 90]
             
             # get sample depths
-            intervals = self.head(input) # [n_sample]
-            t_vals = torch.cumsum(intervals) # make sure it is in ascending order
-            # t_vals = t_vals / t_vals.max() # to make sure it is in [0, 1]
+            intervals = self.head(input) / (0.5 * n_sample) # [n_ray, n_sample]
+            t_vals = torch.cumsum(intervals, dim=1) # make sure it is in ascending order
+            if global_step % 100 == 0:
+                logtmp = ['%.3f' % x for x in t_vals[0]]
+                self.print('t_vals: ' + ' '.join(logtmp))
             z_vals = self.near * (1 - t_vals) + self.far * t_vals # depth, [n_ray, n_sample]
         else:
             t_vals = torch.linspace(0., 1., steps=n_sample)

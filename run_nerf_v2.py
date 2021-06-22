@@ -209,7 +209,7 @@ def create_nerf(args, near, far):
     """Instantiate NeRF's MLP model.
     """
     # set up model
-    model = NeRF_v2(args, near, far).to(device)
+    model = NeRF_v2(args, near, far, print=netprint).to(device)
     grad_vars = list(model.parameters())
 
     # set up optimizer
@@ -443,6 +443,7 @@ def train():
     global logger; logger = Logger(args)
     global print; print = logger.log_printer.logprint
     global accprint; accprint = logger.log_printer.accprint
+    global netprint; netprint = logger.log_printer.netprint
 
     # Load data
     if args.dataset_type == 'llff':
@@ -645,7 +646,7 @@ def train():
                 batch_rays = torch.stack([rays_o, rays_d], 0)
                 target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
             
-            rgb, disp, acc, weights, depth = model(rays_o, rays_d)
+            rgb, disp, acc, weights, depth = model(rays_o, rays_d, global_step=global_step)
             try:
                 loss = img2mse(rgb, target_s) # F.mse_loss(rgb, target_s)
                 optimizer.zero_grad()

@@ -116,7 +116,7 @@ parser.add_argument('--N_iters', type=int, default=200000)
 parser.add_argument('--skips', type=str, default='4')
 parser.add_argument('--D_head', type=int, default=4)
 parser.add_argument('--n_sample_per_ray', type=int, default=192)
-parser.add_argument('--use_encoding_for_input', action='store_true')
+parser.add_argument('--encode_input', action='store_true')
 parser.add_argument('--pretrained_ckpt', type=str, default='')
 parser.add_argument('--resume', action="store_true", 
         help='if True, resume the optimizer')
