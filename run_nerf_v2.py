@@ -169,14 +169,14 @@ def render_path(model, render_poses, hwf, chunk, render_kwargs, gt_imgs=None, sa
         focal = focal/render_factor
 
     rgbs, disps = [], []
-    for i, c2w in enumerate(tqdm(render_poses)): # c2w: [4, 4]
-        print(f'Test rendering {i}')
+    for i, c2w in enumerate(render_poses): # c2w: [4, 4]
+        # print(f'Test rendering {i}')
         # rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)
         rays_o, rays_d = get_rays(H, W, focal, c2w)
         rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3)
         rgb, disp = [], []
-        for i in range(0, rays_o.shape[0], chunk):
-            rgb_, disp_, *_ = model( rays_o[i: i+chunk], rays_d[i: i+chunk] )
+        for ix in range(0, rays_o.shape[0], chunk):
+            rgb_, disp_, *_ = model(rays_o[ix: ix+chunk], rays_d[ix: ix+chunk])
             rgb += [rgb_]
             disp += [disp_]
         rgb, disp = torch.cat(rgb, dim=0), torch.cat(disp, dim=0)
@@ -184,25 +184,23 @@ def render_path(model, render_poses, hwf, chunk, render_kwargs, gt_imgs=None, sa
 
         rgbs.append(rgb.cpu().numpy())
         disps.append(disp.cpu().numpy())
-        if i == 0:
-            print(rgb.shape, disp.shape)
-
-        """
-        if gt_imgs is not None and render_factor==0:
-            p = -10. * np.log10(np.mean(np.square(rgb.cpu().numpy() - gt_imgs[i])))
-            print(p)
-        """
 
         if savedir is not None:
             rgb8 = to8b(rgbs[-1])
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
             imageio.imwrite(filename, rgb8)
-            print(f'saving to {filename}') # @mst
 
     rgbs = np.stack(rgbs, 0)
     disps = np.stack(disps, 0)
+    
+    if gt_imgs is not None:
+        rgbs = torch.from_numpy(rgbs).to(device)
+        test_loss = img2mse(rgbs, gt_imgs)
+        test_psnr = mse2psnr(test_loss)
+    else:
+        test_loss, test_psnr = None, None
 
-    return rgbs, disps
+    return rgbs, disps, test_loss, test_psnr
 
 
 def create_nerf(args, near, far):
@@ -388,12 +386,6 @@ def render_rays(ray_batch,
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
     # when training: [1024, 1, 3] + [1024, 1, 3] * [1024, 64, 1]
     # rays_d range: [-1, 1]
-    # --- @mst
-    # print(f'rays_o[...,None,:] shape: {(rays_o[...,None,:]).shape}') # shape: torch.Size([32768, 1, 3])
-    # print(f'rays_d[...,None,:] shape: {(rays_d[...,None,:]).shape}') # shape: torch.Size([32768, 1, 3])
-    # print(f'z_vals[...,:,None] shape: {(z_vals[...,:,None]).shape}') # shape: torch.Size([32768, 64, 1])
-    # print(f'               pts shape: {pts.shape}') # shape: torch.Size([32768, 64, 3])
-    # ---
 
 #     raw = run_network(pts)
     raw = network_query_fn(pts, viewdirs, network_fn)
@@ -432,19 +424,19 @@ def render_rays(ray_batch,
 
     return ret
 
-# @mst: ---------------------
+# set up logging directories -------
 from logger import Logger
 from utils import Timer, check_path
 from option import args
-# ---------------------------
+
+logger = Logger(args)
+print = logger.log_printer.logprint
+accprint = logger.log_printer.accprint
+netprint = logger.log_printer.netprint
+ExpID = logger.ExpID
+# ---------------------------------
 
 def train():
-    # set up logging directories
-    global logger; logger = Logger(args)
-    global print; print = logger.log_printer.logprint
-    global accprint; accprint = logger.log_printer.accprint
-    global netprint; netprint = logger.log_printer.netprint
-
     # Load data
     if args.dataset_type == 'llff':
         images, poses, bds, render_poses, i_test = load_llff_data(args.datadir, args.factor,
@@ -528,8 +520,7 @@ def train():
             file.write(open(args.config, 'r').read())
 
     # Create nerf model
-    near, far = 2, 6
-    model, optimizer, start, render_kwargs_train, render_kwargs_test,  = create_nerf(args, near, far)
+    model, optimizer, start, render_kwargs_train, render_kwargs_test = create_nerf(args, near, far)
 
     bds_dict = {
         'near' : near,
@@ -556,7 +547,7 @@ def train():
             testsavedir = os.path.join(basedir, expname, 'renderonly_{}_{:06d}'.format('test' if args.render_test else 'path', start))
             os.makedirs(testsavedir, exist_ok=True)
 
-            rgbs, _ = render_path(render_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=images, savedir=testsavedir, render_factor=args.render_factor)
+            rgbs, *_ = render_path(render_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=images, savedir=testsavedir, render_factor=args.render_factor)
             print('Done rendering', testsavedir)
             imageio.mimwrite(os.path.join(testsavedir, 'video.mp4'), to8b(rgbs), fps=30, quality=8)
 
@@ -593,6 +584,7 @@ def train():
     print('%d TEST views are' % len(i_test), i_test)
     print('%d VAL views are' % len(i_val), i_val)
     timer = Timer((args.N_iters - start) / args.i_print)
+    hist_loss, hist_psnr = 0, 0
     for i in trange(start + 1, args.N_iters + 1):
         global_step = i
 
@@ -653,24 +645,39 @@ def train():
                 loss.backward()
             except:
                 print(rgb.mean(), target_s.mean(), loss)
+                print('Got exception. Please check.')
                 exit()
             optimizer.step()
+            psnr = mse2psnr(loss)
+
+            # smoothing for log print
+            hist_loss = hist_loss * 0.95 + loss.item() * 0.05
+            hist_psnr = hist_psnr * 0.95 + psnr.item() * 0.05
 
         # print logs of training
         if i % args.i_print == 0:
-            psnr = mse2psnr(loss)
-            logstr = f"[TRAIN] Iter {i:6d} Loss {loss.item():.6f}  PSNR {psnr.item():.4f} LR {new_lrate:.10f}"
-            accprint(logstr)
+            logstr = f"[TRAIN] Iter {i} Loss {loss.item():.4f} HistLoss {hist_loss:.4f} PSNR {psnr.item():.4f} HistPSNR {hist_psnr:.4f}"
+            print(logstr)
             # tqdm.write(logstr)
-            print('Predicted finish time: %s' % timer())
+            print(f'Predicted finish time: {timer()}')
 
-        # validation: using the splitted test images
+        # test: using the splitted test images
         if i % args.i_testset == 0 and i > 0:
-            testsavedir = os.path.join(basedir, expname, 'testset_{:06d}'.format(i))
+            testsavedir = os.path.join(basedir, expname, f'testset_iter{i}')
             os.makedirs(testsavedir, exist_ok=True)
             with torch.no_grad():
-                render_path(model, torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
-            print('Saved test set')
+                *_, test_loss, test_psnr = render_path(model, torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
+            accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} LR {new_lrate:.8f} -- Saved rendered test images: "{testsavedir}"')
+
+        # test: using novel poses 
+        if i % args.i_video == 0 and i > 0:
+            with torch.no_grad():
+                rgbs, disps, *_ = render_path(model, render_poses, hwf, args.chunk, render_kwargs_test)
+            moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
+            rgb_path, disp_path = moviebase + 'rgb_%s.mp4' % ExpID, moviebase + 'disp_%s.mp4' % ExpID
+            imageio.mimwrite(rgb_path, to8b(rgbs), fps=30, quality=8)
+            imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
+            print(f'[VIDEO] Rendering done. Save video: "{rgb_path}"')
 
         # save checkpoint
         if i % args.i_weights == 0:
@@ -680,16 +687,7 @@ def train():
                 'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
             }, path)
-            print('Saved checkpoints at', path)
-
-        # test: using novel poses 
-        if i % args.i_video == 0 and i > 0:
-            with torch.no_grad():
-                rgbs, disps = render_path(model, render_poses, hwf, args.chunk, render_kwargs_test)
-            moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
-            imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
-            imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
-            print('Rendering done, save video at %s' % (moviebase + 'rgb.mp4'))
+            print(f'Iter {i} Save checkpoint: "{path}"')
 
 if __name__=='__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')
