@@ -122,5 +122,7 @@ parser.add_argument('--resume', action="store_true",
         help='if True, resume the optimizer')
 parser.add_argument('--learn_pts', action="store_true", 
         help='if True, learn sampling positions')
-
+parser.add_argument('--teacher_ckpt', type=str,
+        help='path of teacher checkpoint for knowledge distillation')
+parser.add_argument('--lw_kd', type=float, default=0.001)
 args = parser.parse_args()

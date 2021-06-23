@@ -109,6 +109,31 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
 
     return rgb_map, disp_map, acc_map, weights, depth_map
 
+def batchify(fn, chunk):
+    """Constructs a version of 'fn' that applies to smaller batches.
+    """
+    if chunk is None:
+        return fn
+    def ret(inputs):
+        return torch.cat([fn(inputs[i:i+chunk]) for i in range(0, inputs.shape[0], chunk)], 0)
+    return ret
+
+def run_network(inputs, viewdirs, fn, embed_fn, embeddirs_fn, netchunk=1024*64):
+    """Prepares inputs and applies network 'fn'.
+    """
+    inputs_flat = torch.reshape(inputs, [-1, inputs.shape[-1]]) # @mst: shape: torch.Size([65536, 3]), 65536=1024*64 (n_rays * n_sample_per_ray)
+    embedded = embed_fn(inputs_flat) # shape: [n_rays*n_sample_per_ray, 63]
+
+    if viewdirs is not None:
+        input_dirs = viewdirs[:,None].expand(inputs.shape)
+        input_dirs_flat = torch.reshape(input_dirs, [-1, input_dirs.shape[-1]])
+        embedded_dirs = embeddirs_fn(input_dirs_flat)
+        embedded = torch.cat([embedded, embedded_dirs], -1)
+    
+    outputs_flat = batchify(fn, netchunk)(embedded)
+    outputs = torch.reshape(outputs_flat, list(inputs.shape[:-1]) + [outputs_flat.shape[-1]])
+    return outputs
+
 class NeRF_v2(nn.Module):
     '''New idea: one forward to get multi-outputs.
     '''
@@ -159,6 +184,12 @@ class NeRF_v2(nn.Module):
             output_ch = 5 if args.N_importance > 0 else 4
             self.output_linear = nn.Linear(W, output_ch)
 
+        # original NeRF forward impl.
+        self.network_query_fn = lambda inputs, viewdirs, network_fn: run_network(inputs, viewdirs, network_fn,
+                                                                    embed_fn=self.embed_fn,
+                                                                    embeddirs_fn=self.embeddirs_fn,
+                                                                    netchunk=args.netchunk)
+
     def forward(self, rays_o, rays_d, global_step=-1):
         n_ray = rays_o.size(0)
         n_sample = self.args.n_sample_per_ray
@@ -175,7 +206,7 @@ class NeRF_v2(nn.Module):
             # get sample depths
             intervals = self.head(input) / (0.5 * n_sample) # [n_ray, n_sample]
             t_vals = torch.cumsum(intervals, dim=1) # make sure it is in ascending order
-            if global_step % 100 == 0:
+            if global_step % self.args.i_print == 0:
                 logtmp = ['%.3f' % x for x in t_vals[0]]
                 self.print('t_vals: ' + ' '.join(logtmp))
             z_vals = self.near * (1 - t_vals) + self.far * t_vals # depth, [n_ray, n_sample]
@@ -223,12 +254,12 @@ class NeRF_v2(nn.Module):
                 h = F.relu(h)
 
             rgb = self.rgb_linear(h)
-            raw = torch.cat([rgb, alpha], dim=-1) # [n_ray, n_sample_per_ray * 4]
+            raw = torch.cat([rgb, alpha], dim=-1)
+            raw = raw.view(raw.size(0), -1, 4) # [n_ray, n_sample_per_ray, 4]
 
         # rendering equation
-        raw = raw.view(raw.size(0), -1, 4)
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False)
-        return rgb_map, disp_map, acc_map, weights, depth_map
+        return rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs
 
 # Ray helpers
 def get_rays(H, W, focal, c2w):
