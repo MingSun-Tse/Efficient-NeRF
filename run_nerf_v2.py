@@ -12,7 +12,7 @@ from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
 
-from run_nerf_helpers import NeRF
+from run_nerf_helpers import NeRF, sample_pdf
 from run_nerf_helpers_v2 import NeRF_v2, img2mse, mse2psnr, to8b, get_rays, get_embedder
 
 from load_llff import load_llff_data
@@ -24,7 +24,6 @@ from collections import OrderedDict
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
 DEBUG = False
-
 
 def batchify(fn, chunk):
     """Constructs a version of 'fn' that applies to smaller batches.
@@ -96,20 +95,8 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
         # special case to render full image
         rays_o, rays_d = get_rays(H, W, focal, c2w)
     else:
-        # @mst: training, choose this way
         # use provided ray batch
         rays_o, rays_d = rays
-    # print(f'rays_o shape {rays_o.shape}') # train: 1024
-    # print(f'H, W: {H, W}') # 400, 400
-
-    # --- @mst
-    # rays are meshgrid
-    # elements in rays_o are all the same!
-    # print(f'rays_o: {rays_o}')
-    # print(f'rays_d: {rays_d}')
-    # print(f'rays_o shape: {rays_o.shape}') # rays_o shape: torch.Size([400, 400, 3]) o: origin
-    # print(f'rays_d shape: {rays_d.shape}') # rays_d shape: torch.Size([400, 400, 3]) d: direction
-    # --- @mst
 
     if use_viewdirs:
         # provide ray directions as input
@@ -131,7 +118,6 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
 
     near, far = near * torch.ones_like(rays_d[...,:1]), far * torch.ones_like(rays_d[...,:1])
     rays = torch.cat([rays_o, rays_d, near, far], -1)
-    # print(f'rays shape {rays.shape}') # @mst: rays shape torch.Size([160000, 8])
 
     if use_viewdirs:
         rays = torch.cat([rays, viewdirs], -1)
@@ -148,28 +134,30 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
     return ret_list + [ret_dict]
 
 
-def render_path(model, render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0):
+def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0):
     H, W, focal = hwf
     if render_factor!=0:
         # Render downsampled for speed
         H = H//render_factor
         W = W//render_factor
         focal = focal/render_factor
-
+    
     rgbs, disps = [], []
-    for i, c2w in enumerate(render_poses): # c2w: [4, 4]
-        # print(f'Test rendering {i}')
-        # rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)
-        rays_o, rays_d = get_rays(H, W, focal, c2w)
-        rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3)
-        rgb, disp = [], []
-        for ix in range(0, rays_o.shape[0], chunk):
-            rgb_, disp_, *_ = model(rays_o[ix: ix+chunk], rays_d[ix: ix+chunk])
-            rgb += [rgb_]
-            disp += [disp_]
-        rgb, disp = torch.cat(rgb, dim=0), torch.cat(disp, dim=0)
-        rgb, disp = rgb.view(H, W, -1), disp.view(H, W, -1)
-
+    for i, c2w in enumerate(render_poses):
+        if new_render_func: # our new rendering func
+            model = render_kwargs['network_fn']
+            rays_o, rays_d = get_rays(H, W, focal, c2w)
+            rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3)
+            rgb, disp = [], []
+            for ix in range(0, rays_o.shape[0], chunk):
+                rgb_, disp_, *_ = model(rays_o[ix: ix+chunk], rays_d[ix: ix+chunk])
+                rgb += [rgb_]
+                disp += [disp_]
+            rgb, disp = torch.cat(rgb, dim=0), torch.cat(disp, dim=0)
+            rgb, disp = rgb.view(H, W, -1), disp.view(H, W, -1)
+        else: # original implementation
+            rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)
+        
         rgbs.append(rgb.cpu().numpy())
         disps.append(disp.cpu().numpy())
 
@@ -185,18 +173,59 @@ def render_path(model, render_poses, hwf, chunk, render_kwargs, gt_imgs=None, sa
         rgbs = torch.from_numpy(rgbs).to(device)
         test_loss = img2mse(rgbs, gt_imgs)
         test_psnr = mse2psnr(test_loss)
+        rgbs = rgbs.data.cpu().numpy() # change back to np array type
     else:
         test_loss, test_psnr = None, None
 
     return rgbs, disps, test_loss, test_psnr
 
-
+def _load_weights(model, ckpt_path, key):
+    ckpt_path = check_path(ckpt_path)
+    ckpt = torch.load(ckpt_path)
+    state_dict = ckpt[key]
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        if 'module.' in k:
+            k = k[7:]
+        new_state_dict[k] = v
+    model.load_state_dict(new_state_dict)
+    return ckpt_path, ckpt
+    
 def create_nerf(args, near, far):
     """Instantiate NeRF's MLP model.
     """
     # set up model
-    model = NeRF_v2(args, near, far, print=netprint).to(device)
-    grad_vars = list(model.parameters())
+    global new_render_func; new_render_func = False
+    model_fine = network_query_fn = None
+    if args.model_name == 'nerf':
+        embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
+        input_ch_views = 0
+        embeddirs_fn = None
+        if args.use_viewdirs:
+            embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
+        output_ch = 5 if args.N_importance > 0 else 4
+        skips = [4]
+        model = NeRF(D=args.netdepth, W=args.netwidth,
+                    input_ch=input_ch, output_ch=output_ch, skips=skips,
+                    input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
+        grad_vars = list(model.parameters())
+
+        if args.N_importance > 0:
+            model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
+                            input_ch=input_ch, output_ch=output_ch, skips=skips,
+                            input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
+            grad_vars += list(model_fine.parameters())
+
+        network_query_fn = lambda inputs, viewdirs, network_fn : run_network(inputs, viewdirs, network_fn,
+                                                                    embed_fn=embed_fn,
+                                                                    embeddirs_fn=embeddirs_fn,
+                                                                    netchunk=args.netchunk)
+    elif args.model_name in ['nerf_v2']:
+        model = NeRF_v2(args, near, far, print=netprint).to(device)
+        new_render_func = True
+        grad_vars = list(model.parameters())
+    
+    # in KD, there is a pretrained teacher
     if args.teacher_ckpt:
         teacher = NeRF(D=8, W=256, input_ch=63, output_ch=4, skips=[4], input_ch_views=27, 
             use_viewdirs=args.use_viewdirs).to(device)
@@ -204,18 +233,19 @@ def create_nerf(args, near, far):
         teacher.eval()
         for param in teacher.parameters():
             param.requires_grad = False
-        # load weights
-        ckpt_path = check_path(args.teacher_ckpt)
-        ckpt = torch.load(ckpt_path)
-        state_dict = ckpt['network_fine_state_dict']
-        new_state_dict = OrderedDict()
-        for k, v in state_dict.items():
-            if 'module.' in k:
-                k = k[7:]
-            new_state_dict[k] = v
-        teacher.load_state_dict(new_state_dict)
-        print('Load teacher ckpt successfully: "%s"' % ckpt_path)
         
+        # load weights
+        ckpt_path, _ = _load_weights(teacher, args.teacher_ckpt, 'network_fine_state_dict')
+        print('Load teacher ckpt successfully: "%s"' % ckpt_path)
+
+        # get network_query_fn
+        embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
+        if args.use_viewdirs:
+            embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
+        network_query_fn = lambda inputs, viewdirs, network_fn : run_network(inputs, viewdirs, network_fn,
+                                                                    embed_fn=embed_fn,
+                                                                    embeddirs_fn=embeddirs_fn,
+                                                                    netchunk=args.netchunk)
     # set up optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
 
@@ -224,18 +254,7 @@ def create_nerf(args, near, far):
 
     # load pretrained checkpoint
     if args.pretrained_ckpt:
-        ckpt_path = check_path(args.pretrained_ckpt)
-        ckpt = torch.load(ckpt_path)
-
-        # load model weights
-        state_dict = ckpt['network_fn_state_dict']
-        new_state_dict = OrderedDict()
-        for k, v in state_dict.items():
-            if 'module.' in k:
-                k = k[7:]
-            new_state_dict[k] = v
-        model.load_state_dict(new_state_dict)
-
+        ckpt_path, ckpt = _load_weights(model, args.pretrained_ckpt, 'network_fn_state_dict')
         # resume optimizer and iteration number if necessary
         if args.resume:
             start = ckpt['global_step']
@@ -245,14 +264,20 @@ def create_nerf(args, near, far):
 
     # set up training args
     render_kwargs_train = {
+        'network_query_fn' : network_query_fn,
         'perturb' : args.perturb,
         'N_importance' : args.N_importance,
+        'network_fine' : model_fine,
         'N_samples' : args.N_samples,
         'network_fn' : model,
         'use_viewdirs' : args.use_viewdirs,
         'white_bkgd' : args.white_bkgd,
         'raw_noise_std' : args.raw_noise_std,
     }
+
+    if args.teacher_ckpt:
+        render_kwargs_train['teacher'] = teacher
+
     # NDC only good for LLFF-style forward facing data
     if args.dataset_type != 'llff' or args.no_ndc:
         print('Not ndc!')
@@ -263,21 +288,8 @@ def create_nerf(args, near, far):
     render_kwargs_test = {k : render_kwargs_train[k] for k in render_kwargs_train}
     render_kwargs_test['perturb'] = False
     render_kwargs_test['raw_noise_std'] = 0.
-    
-
-    # set up original NeRF forward function
-    embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
-    if args.use_viewdirs:
-        embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
-    network_query_fn = lambda inputs, viewdirs, network_fn : run_network(inputs, viewdirs, network_fn,
-                                                            embed_fn=embed_fn,
-                                                            embeddirs_fn=embeddirs_fn,
-                                                            netchunk=args.netchunk)
-                                                            
-    if args.teacher_ckpt:
-        return model, optimizer, start, render_kwargs_train, render_kwargs_test, teacher, network_query_fn
-    else:
-        return model, optimizer, start, render_kwargs_train, render_kwargs_test
+                                                   
+    return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
 
 
 def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False):
@@ -445,7 +457,7 @@ def render_rays(ray_batch,
 
 # set up logging directories -------
 from logger import Logger
-from utils import Timer, check_path
+from utils import Timer, check_path, LossLine
 from option import args
 
 logger = Logger(args)
@@ -539,10 +551,7 @@ def train():
             file.write(open(args.config, 'r').read())
 
     # Create nerf model
-    if args.teacher_ckpt:
-        model, optimizer, start, render_kwargs_train, render_kwargs_test, teacher, network_query_fn = create_nerf(args, near, far)
-    else:
-        model, optimizer, start, render_kwargs_train, render_kwargs_test = create_nerf(args, near, far)
+    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args, near, far)
 
     bds_dict = {
         'near' : near,
@@ -556,12 +565,11 @@ def train():
 
     # Short circuit if only rendering out from trained model
     if args.render_only:
-        # TODO
         print('RENDER ONLY')
         with torch.no_grad():
             if args.render_test:
                 # render_test switches to test poses
-                images = images[i_test]
+                images = torch.Tensor(images[i_test]).to(device)
             else:
                 # Default is smoother render_poses path
                 images = None
@@ -569,30 +577,31 @@ def train():
             testsavedir = os.path.join(basedir, expname, 'renderonly_{}_{:06d}'.format('test' if args.render_test else 'path', start))
             os.makedirs(testsavedir, exist_ok=True)
 
-            rgbs, *_ = render_path(render_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=images, savedir=testsavedir, render_factor=args.render_factor)
-            print('Done rendering', testsavedir)
+            rgbs, *_, test_loss, test_psnr = render_path(render_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=images, savedir=testsavedir, render_factor=args.render_factor)
             imageio.mimwrite(os.path.join(testsavedir, 'video.mp4'), to8b(rgbs), fps=30, quality=8)
-
+            print(f'[VIDEO] Rendering done. Save video: "{testsavedir}"')
+            if args.render_test:
+                accprint(f'[TEST] Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
             return
 
     # Prepare raybatch tensor if batching random rays
     N_rand = args.N_rand
     use_batching = not args.no_batching
-    # if use_batching:
-    #     # For random ray batching
-    #     print('get rays')
-    #     rays = np.stack([get_rays_np(H, W, focal, p) for p in poses[:,:3,:4]], 0) # [N, ro+rd, H, W, 3]
-    #     print('done, concats')
-    #     rays_rgb = np.concatenate([rays, images[:,None]], 1) # [N, ro+rd+rgb, H, W, 3]
-    #     rays_rgb = np.transpose(rays_rgb, [0,2,3,1,4]) # [N, H, W, ro+rd+rgb, 3]
-    #     rays_rgb = np.stack([rays_rgb[i] for i in i_train], 0) # train images only
-    #     rays_rgb = np.reshape(rays_rgb, [-1,3,3]) # [(N-1)*H*W, ro+rd+rgb, 3]
-    #     rays_rgb = rays_rgb.astype(np.float32)
-    #     print('shuffle rays')
-    #     np.random.shuffle(rays_rgb)
+    if use_batching:
+        # For random ray batching
+        print('get rays')
+        rays = np.stack([get_rays_np(H, W, focal, p) for p in poses[:,:3,:4]], 0) # [N, ro+rd, H, W, 3]
+        print('done, concats')
+        rays_rgb = np.concatenate([rays, images[:,None]], 1) # [N, ro+rd+rgb, H, W, 3]
+        rays_rgb = np.transpose(rays_rgb, [0,2,3,1,4]) # [N, H, W, ro+rd+rgb, 3]
+        rays_rgb = np.stack([rays_rgb[i] for i in i_train], 0) # train images only
+        rays_rgb = np.reshape(rays_rgb, [-1,3,3]) # [(N-1)*H*W, ro+rd+rgb, 3]
+        rays_rgb = rays_rgb.astype(np.float32)
+        print('shuffle rays')
+        np.random.shuffle(rays_rgb)
 
-    #     print('done')
-    #     i_batch = 0
+        print('done')
+        i_batch = 0
 
     # Move training data to GPU
     images = torch.Tensor(images).to(device)
@@ -660,25 +669,54 @@ def train():
                 batch_rays = torch.stack([rays_o, rays_d], 0)
                 target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
             
-            rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step)
-            loss_rgb = img2mse(rgb, target_s)
-            psnr = mse2psnr(loss_rgb)
-            loss_kd = torch.Tensor([0]).to(device)
-            if args.teacher_ckpt:
-                teacher_raw = network_query_fn(pts, viewdirs, teacher)
-                loss_kd = F.mse_loss(raw, teacher_raw.detach())
+            loss = 0
+            loss_line = LossLine()
+            if args.model_name == 'nerf':
+                rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
+                                                        verbose=i < 10, retraw=True,
+                                                        **render_kwargs_train)
+                img_loss = img2mse(rgb, target_s)
+                trans = extras['raw'][...,-1]
+                loss += img_loss
+                psnr = mse2psnr(img_loss)
+                loss_line.update('loss_rgb', img_loss.item(), '.4f')
+                loss_line.update('psnr', psnr.item(), '.2f')
+                if 'rgb0' in extras:
+                    img_loss0 = img2mse(extras['rgb0'], target_s)
+                    loss += img_loss0
+                    psnr0 = mse2psnr(img_loss0)
+
+            elif args.model_name in ['nerf_v2']:
+                model = render_kwargs_train['network_fn']
+                rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step)
+                img_loss = img2mse(rgb, target_s)
+                loss += img_loss
+                psnr = mse2psnr(img_loss)
+                loss_line.update('loss_rgb', img_loss.item(), '.4f')
+                loss_line.update('psnr', psnr.item(), '.2f')
+
+                loss_kd = torch.Tensor([0]).to(device)
+                if args.teacher_ckpt:
+                    teacher = render_kwargs_train['teacher']
+                    network_query_fn = render_kwargs_train['network_query_fn']
+                    teacher_raw = network_query_fn(pts, viewdirs, teacher)
+                    loss_kd = F.mse_loss(raw, teacher_raw.detach())
+                    loss += loss_kd * args.lw_kd
+                    loss_line.update('loss_kd (*%s)' % args.lw_kd, loss_kd.item(), '.4f')
+            
             optimizer.zero_grad()
-            loss = loss_rgb + loss_kd * args.lw_kd
             loss.backward()
             optimizer.step()
 
             # smoothing for log print
             hist_loss = hist_loss * 0.95 + loss.item() * 0.05
             hist_psnr = hist_psnr * 0.95 + psnr.item() * 0.05
+            loss_line.update('hist_loss', hist_loss, '.4f')
+            loss_line.update('hist_psnr', hist_psnr, '.2f')
 
         # print logs of training
         if i % args.i_print == 0:
-            logstr = f"[TRAIN] Iter {i} loss_rgb {loss_rgb.item():.4f} loss_kd (*{args.lw_kd}) {loss_kd.item():.4f} HistLoss {hist_loss:.4f} PSNR {psnr.item():.4f} HistPSNR {hist_psnr:.4f}"
+            logstr = f"[TRAIN] Iter {i} " + loss_line.format()
             print(logstr)
             # tqdm.write(logstr)
             print(f'Predicted finish time: {timer()}')
@@ -688,13 +726,14 @@ def train():
             testsavedir = os.path.join(basedir, expname, f'testset_iter{i}')
             os.makedirs(testsavedir, exist_ok=True)
             with torch.no_grad():
-                *_, test_loss, test_psnr = render_path(model, torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
+                *_, test_loss, test_psnr = render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], 
+                    savedir=testsavedir)
             accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} LR {new_lrate:.8f} -- Saved rendered test images: "{testsavedir}"')
 
-        # test: using novel poses 
+        # test: using novel poses
         if i % args.i_video == 0:
             with torch.no_grad():
-                rgbs, disps, *_ = render_path(model, render_poses, hwf, args.chunk, render_kwargs_test)
+                rgbs, disps, *_ = render_path(render_poses, hwf, args.chunk, render_kwargs_test, new_render_func=new_render_func)
             moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
             rgb_path, disp_path = moviebase + 'rgb_%s.mp4' % ExpID, moviebase + 'disp_%s.mp4' % ExpID
             imageio.mimwrite(rgb_path, to8b(rgbs), fps=30, quality=8)
@@ -703,7 +742,7 @@ def train():
 
         # save checkpoint
         if i % args.i_weights == 0:
-            path = os.path.join(basedir, expname, '{:06d}.tar'.format(i))
+            path = os.path.join(logger.weights_path, '{:06d}.tar'.format(i))
             torch.save({
                 'global_step': global_step,
                 'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
