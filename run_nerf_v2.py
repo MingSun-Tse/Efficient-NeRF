@@ -618,7 +618,7 @@ def train():
     print('%d TRAIN views are' % len(i_train), i_train)
     print('%d TEST views are' % len(i_test), i_test)
     print('%d VAL views are' % len(i_val), i_val)
-    timer = Timer((args.N_iters - start) / args.i_print)
+    timer = Timer((args.N_iters - start) / args.i_testset)
     hist_loss, hist_psnr = 0, 0
     for i in trange(start + 1, args.N_iters + 1):
         global_step = i
@@ -724,7 +724,6 @@ def train():
             logstr = f"[TRAIN] Iter {i} " + loss_line.format()
             print(logstr)
             # tqdm.write(logstr)
-            print(f'Predicted finish time: {timer()}')
 
         # test: using the splitted test images
         if i % args.i_testset == 0:
@@ -734,7 +733,9 @@ def train():
                 print('Testing...')
                 *_, test_loss, test_psnr = render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], 
                     savedir=testsavedir)
-            accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} LR {new_lrate:.8f} -- Saved rendered test images: "{testsavedir}"')
+            accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} LR {new_lrate:.8f}')
+            print(f'Saved rendered test images: "{testsavedir}"')
+            print(f'Predicted finish time: {timer()}')
 
         # test: using novel poses
         if i % args.i_video == 0:

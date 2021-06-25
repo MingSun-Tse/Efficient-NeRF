@@ -757,7 +757,7 @@ def train():
     # writer = SummaryWriter(os.path.join(basedir, 'summaries', expname))
     
     start = start + 1
-    timer = Timer((N_iters - start) / args.i_print)
+    timer = Timer((N_iters - start) / args.i_testset)
     hist_loss = hist_psnr = 0
     for i in trange(start, N_iters):
         time0 = time.time()
@@ -857,8 +857,10 @@ def train():
             os.makedirs(testsavedir, exist_ok=True)
             with torch.no_grad():
                 *_, test_loss, test_psnr = render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
-            accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} LR {new_lrate:.8f} -- Saved rendered test images: "{testsavedir}"')
-        
+            accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} LR {new_lrate:.8f}')
+            print(f'Saved rendered test images: "{testsavedir}"')
+            print(f'Predicted finish time: {timer()}')
+
         # test: using novel poses 
         if i % args.i_video == 0 and i > 0:
             # Turn on testing mode
