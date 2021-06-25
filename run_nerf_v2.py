@@ -735,7 +735,7 @@ def train():
                     savedir=testsavedir)
             accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} LR {new_lrate:.8f}')
             print(f'Saved rendered test images: "{testsavedir}"')
-            print(f'Predicted finish time: {timer()}')
+            print(f'Predicted finish time: {timer()}') 
 
         # test: using novel poses
         if i % args.i_video == 0:
