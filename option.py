@@ -101,7 +101,7 @@ parser.add_argument("--i_img",     type=int, default=500,
                     help='frequency of tensorboard image logging')
 parser.add_argument("--i_weights", type=int, default=10000, 
                     help='frequency of weight ckpt saving')
-parser.add_argument("--i_testset", type=int, default=50000, 
+parser.add_argument("--i_testset", type=int, default=2000, 
                     help='frequency of testset saving')
 parser.add_argument("--i_video",   type=int, default=50000, 
                     help='frequency of render_poses video saving')
@@ -126,4 +126,5 @@ parser.add_argument('--learn_pts', action="store_true",
 parser.add_argument('--teacher_ckpt', type=str,
         help='path of teacher checkpoint for knowledge distillation')
 parser.add_argument('--lw_kd', type=float, default=0.001)
+parser.add_argument('--split_layer', type=int, default=-1)
 args = parser.parse_args()

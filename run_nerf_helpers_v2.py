@@ -1,3 +1,4 @@
+from os import getgroups
 import torch
 torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn 
@@ -166,20 +167,37 @@ class NeRF_v2(nn.Module):
         self.head = nn.Sequential(*head)
 
         # body network
-        self.pts_linears = nn.ModuleList(
-            [nn.Linear(input_ch * n_sample_per_ray, W)] + [nn.Linear(W, W) if i not in self.skips else nn.Linear(W + input_ch * n_sample_per_ray, W) for i in range(D-1)])
-        
+        if args.split_layer > 0:
+            modules = [nn.Conv2d(input_ch * n_sample_per_ray, W, kernel_size=1, groups=1)]
+            for i in range(D - 1):
+                if i not in self.skips:
+                    modules += [nn.Conv2d(W, W, kernel_size=1, groups=n_sample_per_ray)]
+                else:
+                    modules += [nn.Conv2d(W + input_ch * n_sample_per_ray, W, kernel_size=1, groups=n_sample_per_ray)]
+            self.pts_linears = nn.ModuleList(modules)
+        else:
+            self.pts_linears = nn.ModuleList(
+                [nn.Linear(input_ch * n_sample_per_ray, W)] + [nn.Linear(W, W) if i not in self.skips else nn.Linear(W + input_ch * n_sample_per_ray, W) for i in range(D - 1)])
+            
         ### Implementation according to the official code release (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
-        self.views_linears = nn.ModuleList([nn.Linear(input_ch_views * n_sample_per_ray + W, W//2)])
+        if self.args.split_layer > 0:
+            self.views_linears = nn.ModuleList([nn.Conv2d(input_ch_views * n_sample_per_ray + W, W, kernel_size=1, groups=n_sample_per_ray)])
+        else:
+            self.views_linears = nn.ModuleList([nn.Linear(input_ch_views * n_sample_per_ray + W, W//2)])
 
         ### Implementation according to the paper
         # self.views_linears = nn.ModuleList(
         #     [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2, W//2) for i in range(D//2)])
         
         if args.use_viewdirs:
-            self.feature_linear = nn.Linear(W, W)
-            self.alpha_linear = nn.Linear(W, n_sample_per_ray)
-            self.rgb_linear = nn.Linear(W//2, 3 * n_sample_per_ray)
+            if self.args.split_layer > 0:
+                self.feature_linear = nn.Conv2d(W, W, kernel_size=1, groups=n_sample_per_ray)
+                self.alpha_linear = nn.Conv2d(W, n_sample_per_ray, kernel_size=1, groups=n_sample_per_ray)
+                self.rgb_linear = nn.Conv2d(W, 3 * n_sample_per_ray, kernel_size=1, groups=n_sample_per_ray)
+            else:
+                self.feature_linear = nn.Linear(W, W)
+                self.alpha_linear = nn.Linear(W, n_sample_per_ray)
+                self.rgb_linear = nn.Linear(W//2, 3 * n_sample_per_ray)
         else:
             output_ch = 5 if args.N_importance > 0 else 4
             self.output_linear = nn.Linear(W, output_ch)
@@ -237,25 +255,50 @@ class NeRF_v2(nn.Module):
             embedded_dirs = embedded_dirs.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray * 27]
 
         # body network
-        h = embedded_pts
-        for i, layer in enumerate(self.pts_linears):
-            h = F.relu(layer(h))
-            if i in self.skips:
-                h = torch.cat([embedded_pts, h], dim=-1)
-        
-        # get raw outputs
-        if self.args.use_viewdirs:
-            alpha = self.alpha_linear(h) # [n_ray, n_sample_per_ray]
-            feature = self.feature_linear(h)
-            h = torch.cat([feature, embedded_dirs], -1)
-        
-            for i, l in enumerate(self.views_linears):
-                h = self.views_linears[i](h)
-                h = F.relu(h)
+        if self.args.split_layer > 0:
+            h = embedded_pts
+            h = h[..., None, None]
+            for i, layer in enumerate(self.pts_linears):
+                h = F.relu(layer(h))
+                if i in self.skips:
+                    h = h.view(n_ray, n_sample, -1)
+                    embedded_pts = embedded_pts.view(n_ray, n_sample, -1)
+                    h = torch.cat([h, embedded_pts], dim=-1) # [n_ray, n_sample_per_ray, -1]
+                    h = h.view(n_ray, -1, 1, 1) # [n_ray, W + n_sample_per_ray * input_ch, 1, 1]
+            # get raw outputs
+            if self.args.use_viewdirs:
+                alpha = self.alpha_linear(h)[..., 0, 0] # [n_ray, n_sample_per_ray]
+                feature = self.feature_linear(h) # [n_ray, W + n_sample_per_ray * input_ch_views, 1, 1]
 
-            rgb = self.rgb_linear(h)
-            raw = torch.cat([rgb, alpha], dim=-1)
-            raw = raw.view(raw.size(0), -1, 4) # [n_ray, n_sample_per_ray, 4]
+                feature = feature.view(n_ray, n_sample, -1)
+                embedded_dirs = embedded_dirs.view(n_ray, n_sample, -1)
+                h = torch.cat([feature, embedded_dirs], dim=-1)
+                h = h.view(n_ray, -1, 1, 1)
+            
+                for i, l in enumerate(self.views_linears):
+                    h = self.views_linears[i](h)
+                    h = F.relu(h)
+
+                rgb = self.rgb_linear(h)[..., 0, 0]
+                raw = torch.cat([rgb, alpha], dim=-1)
+                raw = raw.view(n_ray, -1, 4) # [n_ray, n_sample_per_ray, 4]
+        else:
+            h = embedded_pts
+            for i, layer in enumerate(self.pts_linears):
+                h = F.relu(layer(h))
+                if i in self.skips:
+                    h = torch.cat([embedded_pts, h], dim=-1)
+            # get raw outputs
+            if self.args.use_viewdirs:
+                alpha = self.alpha_linear(h) # [n_ray, n_sample_per_ray]
+                feature = self.feature_linear(h)
+                h = torch.cat([feature, embedded_dirs], -1)
+                for i, l in enumerate(self.views_linears):
+                    h = self.views_linears[i](h)
+                    h = F.relu(h)
+                rgb = self.rgb_linear(h)
+                raw = torch.cat([rgb, alpha], dim=-1)
+                raw = raw.view(n_ray, -1, 4) # [n_ray, n_sample_per_ray, 4]
 
         # rendering equation
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False)
