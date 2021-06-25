@@ -232,6 +232,14 @@ class NeRF_v2(nn.Module):
             t_vals = torch.linspace(0., 1., steps=n_sample)
             t_vals = t_vals[None, :].expand(n_ray, n_sample)
             z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
+            if self.args.perturb > 0.:
+                # get intervals between samples
+                mids = .5 * (z_vals[...,1:] + z_vals[...,:-1])
+                upper = torch.cat([mids, z_vals[...,-1:]], -1)
+                lower = torch.cat([z_vals[...,:1], mids], -1)
+                # stratified samples in those intervals
+                t_rand = torch.rand(z_vals.shape) # uniform dist [0, 1)
+                z_vals = lower + (upper - lower) * t_rand
         
         # get sample coordinates
         pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, 3]
