@@ -255,6 +255,9 @@ def create_nerf(args, near, far):
     # load pretrained checkpoint
     if args.pretrained_ckpt:
         ckpt_path, ckpt = _load_weights(model, args.pretrained_ckpt, 'network_fn_state_dict')
+        if model_fine is not None:
+            _load_weights(model_fine, args.pretrained_ckpt, 'network_fine_state_dict')
+        
         # resume optimizer and iteration number if necessary
         if args.resume:
             start = ckpt['global_step']
@@ -703,7 +706,6 @@ def train():
                     loss_kd = F.mse_loss(raw, teacher_raw.detach())
                     loss += loss_kd * args.lw_kd
                     loss_line.update('loss_kd (*%s)' % args.lw_kd, loss_kd.item(), '.4f')
-                     
             
             optimizer.zero_grad()
             loss.backward()
