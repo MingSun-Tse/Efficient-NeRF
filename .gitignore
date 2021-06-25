@@ -8,3 +8,6 @@ data/imagenet*
 base_models
 model/*.th
 train_params/
+data/
+tiny_nerf_data.npz
+*.txt
