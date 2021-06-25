@@ -208,7 +208,7 @@ class NeRF_v2(nn.Module):
                                                                     embeddirs_fn=self.embeddirs_fn,
                                                                     netchunk=args.netchunk)
 
-    def forward(self, rays_o, rays_d, global_step=-1):
+    def forward(self, rays_o, rays_d, global_step=-1, perturb=0):
         n_ray = rays_o.size(0)
         n_sample = self.args.n_sample_per_ray
 
@@ -232,7 +232,7 @@ class NeRF_v2(nn.Module):
             t_vals = torch.linspace(0., 1., steps=n_sample)
             t_vals = t_vals[None, :].expand(n_ray, n_sample)
             z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
-            if self.args.perturb > 0.:
+            if perturb > 0.:
                 # get intervals between samples
                 mids = .5 * (z_vals[...,1:] + z_vals[...,:-1])
                 upper = torch.cat([mids, z_vals[...,-1:]], -1)

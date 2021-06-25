@@ -146,11 +146,12 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     for i, c2w in enumerate(render_poses):
         if new_render_func: # our new rendering func
             model = render_kwargs['network_fn']
+            perturb = render_kwargs['perturb']
             rays_o, rays_d = get_rays(H, W, focal, c2w)
             rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3)
             rgb, disp = [], []
             for ix in range(0, rays_o.shape[0], chunk):
-                rgb_, disp_, *_ = model(rays_o[ix: ix+chunk], rays_d[ix: ix+chunk])
+                rgb_, disp_, *_ = model(rays_o[ix: ix+chunk], rays_d[ix: ix+chunk], perturb=perturb)
                 rgb += [rgb_]
                 disp += [disp_]
             rgb, disp = torch.cat(rgb, dim=0), torch.cat(disp, dim=0)
@@ -576,10 +577,10 @@ def train():
             else:
                 # Default is smoother render_poses path
                 images = None
-
             testsavedir = os.path.join(basedir, expname, 'renderonly_{}_{:06d}'.format('test' if args.render_test else 'path', start))
             os.makedirs(testsavedir, exist_ok=True)
-
+            
+            print('Rendering video...')
             rgbs, *_, test_loss, test_psnr = render_path(render_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=images, savedir=testsavedir, render_factor=args.render_factor)
             imageio.mimwrite(os.path.join(testsavedir, 'video.mp4'), to8b(rgbs), fps=30, quality=8)
             print(f'[VIDEO] Rendering done. Save video: "{testsavedir}"')
@@ -691,7 +692,8 @@ def train():
 
             elif args.model_name in ['nerf_v2']:
                 model = render_kwargs_train['network_fn']
-                rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step)
+                perturb = render_kwargs_train['perturb']
+                rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
                 img_loss = img2mse(rgb, target_s)
                 loss += img_loss
                 psnr = mse2psnr(img_loss)
@@ -729,6 +731,7 @@ def train():
             testsavedir = os.path.join(basedir, expname, f'testset_iter{i}')
             os.makedirs(testsavedir, exist_ok=True)
             with torch.no_grad():
+                print('Testing...')
                 *_, test_loss, test_psnr = render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], 
                     savedir=testsavedir)
             accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} LR {new_lrate:.8f} -- Saved rendered test images: "{testsavedir}"')
@@ -736,7 +739,8 @@ def train():
         # test: using novel poses
         if i % args.i_video == 0:
             with torch.no_grad():
-                rgbs, disps, *_ = render_path(render_poses, hwf, args.chunk, render_kwargs_test, new_render_func=new_render_func)
+                print('Rendering video...')
+                rgbs, disps, *_ = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
             moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
             rgb_path, disp_path = moviebase + 'rgb_%s.mp4' % ExpID, moviebase + 'disp_%s.mp4' % ExpID
             imageio.mimwrite(rgb_path, to8b(rgbs), fps=30, quality=8)
