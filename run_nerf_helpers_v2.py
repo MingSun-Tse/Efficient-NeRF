@@ -215,6 +215,11 @@ class NeRF_v2(nn.Module):
                                                                     embeddirs_fn=self.embeddirs_fn,
                                                                     netchunk=args.netchunk)
 
+        # use dropout
+        self.dropout_layer = [10000, 10000] # a large int as placeholder
+        if self.args.dropout_layer:
+            self.dropout_layer = [int(x) for x in self.args.dropout_layer.split(',')]
+
     def forward(self, rays_o, rays_d, global_step=-1, perturb=0):
         n_ray = rays_o.size(0)
         n_sample = self.args.n_sample_per_ray
@@ -301,16 +306,20 @@ class NeRF_v2(nn.Module):
             h = embedded_pts
             for i, layer in enumerate(self.pts_linears):
                 h = F.relu(layer(h))
+                if i >= self.dropout_layer[0]:
+                    h = F.dropout(h)
                 if i in self.skips:
                     h = torch.cat([embedded_pts, h], dim=-1)
+
             # get raw outputs
             if self.args.use_viewdirs:
                 alpha = self.alpha_linear(h) # [n_ray, n_sample_per_ray]
                 feature = self.feature_linear(h)
                 h = torch.cat([feature, embedded_dirs], -1)
-                for i, l in enumerate(self.views_linears):
-                    h = self.views_linears[i](h)
-                    h = F.relu(h)
+                for i, layer in enumerate(self.views_linears):
+                    h = F.relu(layer(h))
+                    if i >= self.dropout_layer[1]:
+                        h = F.dropout(h)
                 rgb = self.rgb_linear(h)
                 raw = torch.cat([rgb, alpha], dim=-1)
                 raw = raw.view(n_ray, -1, 4) # [n_ray, n_sample_per_ray, 4]
