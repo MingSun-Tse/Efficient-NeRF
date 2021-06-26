@@ -64,7 +64,7 @@ def get_embedder(multires, i=0):
     embed = lambda x, eo=embedder_obj : eo.embed(x)
     return embed, embedder_obj.out_dim
 
-def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False, global_step=-1):
+def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False, global_step=-1, print=print):
     """Transforms model's predictions to semantically meaningful values.
     Args:
         raw: [num_rays, num_samples along ray, 4]. Prediction from model.
@@ -219,7 +219,7 @@ class NeRF_v2(nn.Module):
         self.dropout_layer = [10000, 10000] # a large int as placeholder
         if self.args.dropout_layer:
             self.dropout_layer = [int(x) for x in self.args.dropout_layer.split(',')]
-
+        
     def forward(self, rays_o, rays_d, global_step=-1, perturb=0):
         n_ray = rays_o.size(0)
         n_sample = self.args.n_sample_per_ray
@@ -325,7 +325,7 @@ class NeRF_v2(nn.Module):
                 raw = raw.view(n_ray, -1, 4) # [n_ray, n_sample_per_ray, 4]
 
         # rendering equation
-        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False, global_step=global_step)
+        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False, global_step=global_step, print=self.print)
         return rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs
 
 # Ray helpers
