@@ -167,8 +167,8 @@ class NeRF_v2(nn.Module):
         self.head = nn.Sequential(*head)
 
         # body network
-        if args.split_layer > 0:
-            modules = [nn.Conv2d(input_ch * n_sample_per_ray, W, kernel_size=1, groups=1)]
+        if args.use_group_conv:
+            modules = [nn.Conv2d(input_ch * n_sample_per_ray, W, kernel_size=1, groups=n_sample_per_ray)]
             for i in range(D - 1):
                 if i not in self.skips:
                     modules += [nn.Conv2d(W, W, kernel_size=1, groups=n_sample_per_ray)]
@@ -180,8 +180,8 @@ class NeRF_v2(nn.Module):
                 [nn.Linear(input_ch * n_sample_per_ray, W)] + [nn.Linear(W, W) if i not in self.skips else nn.Linear(W + input_ch * n_sample_per_ray, W) for i in range(D - 1)])
             
         ### Implementation according to the official code release (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
-        if self.args.split_layer > 0:
-            self.views_linears = nn.ModuleList([nn.Conv2d(input_ch_views * n_sample_per_ray + W, W, kernel_size=1, groups=n_sample_per_ray)])
+        if self.args.use_group_conv:
+            self.views_linears = nn.ModuleList([nn.Conv2d(input_ch_views * n_sample_per_ray + W, W//2, kernel_size=1, groups=n_sample_per_ray)])
         else:
             self.views_linears = nn.ModuleList([nn.Linear(input_ch_views * n_sample_per_ray + W, W//2)])
 
@@ -190,10 +190,10 @@ class NeRF_v2(nn.Module):
         #     [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2, W//2) for i in range(D//2)])
         
         if args.use_viewdirs:
-            if self.args.split_layer > 0:
+            if self.args.use_group_conv:
                 self.feature_linear = nn.Conv2d(W, W, kernel_size=1, groups=n_sample_per_ray)
                 self.alpha_linear = nn.Conv2d(W, n_sample_per_ray, kernel_size=1, groups=n_sample_per_ray)
-                self.rgb_linear = nn.Conv2d(W, 3 * n_sample_per_ray, kernel_size=1, groups=n_sample_per_ray)
+                self.rgb_linear = nn.Conv2d(W//2, 3 * n_sample_per_ray, kernel_size=1, groups=n_sample_per_ray)
             else:
                 self.feature_linear = nn.Linear(W, W)
                 self.alpha_linear = nn.Linear(W, n_sample_per_ray)
@@ -263,7 +263,7 @@ class NeRF_v2(nn.Module):
             embedded_dirs = embedded_dirs.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray * 27]
 
         # body network
-        if self.args.split_layer > 0:
+        if self.args.use_group_conv:
             h = embedded_pts
             h = h[..., None, None]
             for i, layer in enumerate(self.pts_linears):
