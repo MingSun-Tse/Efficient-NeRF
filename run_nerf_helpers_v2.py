@@ -64,7 +64,7 @@ def get_embedder(multires, i=0):
     embed = lambda x, eo=embedder_obj : eo.embed(x)
     return embed, embedder_obj.out_dim
 
-def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False):
+def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False, global_step=-1):
     """Transforms model's predictions to semantically meaningful values.
     Args:
         raw: [num_rays, num_samples along ray, 4]. Prediction from model.
@@ -97,6 +97,13 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
             noise = torch.Tensor(noise)
 
     alpha = raw2alpha(raw[...,3] + noise, dists)  # [N_rays, N_samples]
+
+    # print to check alpha
+    if global_step % 100 == 0:
+        for i_ray in range(0, alpha.shape[0], 100):
+            logtmp = ['%.4f' % x  for x in alpha[i_ray]]
+            print('%4d: ' % i_ray + ' '.join(logtmp))
+
     # weights = alpha * tf.math.cumprod(1.-alpha + 1e-10, -1, exclusive=True)
     weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)), 1.-alpha + 1e-10], -1), -1)[:, :-1] # @mst: [N_rays, N_samples]
     rgb_map = torch.sum(weights[...,None] * rgb, -2)  # [N_rays, 3]
@@ -309,7 +316,7 @@ class NeRF_v2(nn.Module):
                 raw = raw.view(n_ray, -1, 4) # [n_ray, n_sample_per_ray, 4]
 
         # rendering equation
-        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False)
+        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False, global_step=global_step)
         return rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs
 
 # Ray helpers

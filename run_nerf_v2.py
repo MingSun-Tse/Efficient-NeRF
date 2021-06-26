@@ -329,6 +329,13 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
             noise = torch.Tensor(noise)
 
     alpha = raw2alpha(raw[...,3] + noise, dists)  # [N_rays, N_samples]
+
+    # print to check alpha
+    if global_step % 100 == 0:
+        for i_ray in range(0, alpha.shape[0], 100):
+            logtmp = ['%.4f' % x  for x in alpha[i_ray]]
+            netprint('%4d: ' % i_ray + ' '.join(logtmp))
+
     # weights = alpha * tf.math.cumprod(1.-alpha + 1e-10, -1, exclusive=True)
     weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)), 1.-alpha + 1e-10], -1), -1)[:, :-1] # @mst: [N_rays, N_samples]
     rgb_map = torch.sum(weights[...,None] * rgb, -2)  # [N_rays, 3]
@@ -620,6 +627,7 @@ def train():
     print('%d VAL views are' % len(i_val), i_val)
     timer = Timer((args.N_iters - start) / args.i_testset)
     hist_loss, hist_psnr = 0, 0
+    global global_step
     for i in trange(start + 1, args.N_iters + 1):
         global_step = i
 
