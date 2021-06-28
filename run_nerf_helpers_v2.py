@@ -220,7 +220,7 @@ class NeRF_v2(nn.Module):
         if self.args.dropout_layer:
             self.dropout_layer = [int(x) for x in self.args.dropout_layer.split(',')]
         
-    def forward(self, rays_o, rays_d, global_step=-1, perturb=0):
+    def forward(self, rays_o, rays_d, global_step=-1, perturb=0, perm_invar=False):
         n_ray = rays_o.size(0)
         n_sample = self.args.n_sample_per_ray
 
@@ -255,11 +255,15 @@ class NeRF_v2(nn.Module):
         
         # get sample coordinates
         pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, 3]
-        
+
+        if perm_invar: # permutation invariance prior
+            rand_index = torch.randperm(n_sample)
+            pts = pts[:, rand_index]
+
         # positional embedding
         embedded_pts = self.embed_fn(pts.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
-        embedded_pts = embedded_pts.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray * 63]
-        
+        embedded_pts = embedded_pts.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray*63]
+
         # pose embedding
         if self.args.use_viewdirs:
             # provide ray directions as input
@@ -270,6 +274,10 @@ class NeRF_v2(nn.Module):
             viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True) # @mst: 'rays_d' is real-world data, needs normalization.
             viewdirs = torch.reshape(viewdirs, [-1, 3]).float() # [n_ray, 3]
             dirs = viewdirs[:, None].expand(pts.shape) # [n_ray, 3] -> [n_ray, n_sample_per_ray, 3]
+
+            if perm_invar: # permutation invariance prior
+                dirs = dirs[:, rand_index]
+
             dirs = torch.reshape(dirs, (-1, 3))
             embedded_dirs = self.embeddirs_fn(dirs)
             embedded_dirs = embedded_dirs.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray * 27]
@@ -323,10 +331,32 @@ class NeRF_v2(nn.Module):
                 rgb = self.rgb_linear(h)
                 raw = torch.cat([rgb, alpha], dim=-1)
                 raw = raw.view(n_ray, -1, 4) # [n_ray, n_sample_per_ray, 4]
+        
+        if perm_invar:
+            inv_rand_index = torch.argsort(rand_index)
+            raw = raw[:, inv_rand_index]
 
         # rendering equation
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False, global_step=global_step, print=self.print)
         return rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs
+    
+    def perm_invar_forward(self, rays_o, rays_d, global_step=-1, perturb=0):
+        rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs = self.forward(rays_o, rays_d, global_step=global_step, perturb=perturb)
+        raws = []
+        for _ in range(self.args.n_perm_invar):
+            out = self.forward(rays_o, rays_d, global_step=-1, perturb=perturb, perm_invar=True)
+            raws.append(out[5])
+        raws = torch.cat(raws, dim=0) # [n_perm_invar, n_ray, n_sample, 4]
+        loss_perm_invar = torch.var(raws, dim=0).mean()
+
+        # print log
+        # if global_step % self.args.i_print == 0:
+        #     raws = raws.view(self.args.n_perm_invar, -1)
+        #     for i in range(self.args.n_perm_invar):
+        #         logtmp = ['%.3f' % x for x in raws[i]]
+        #         self.print(' '.join(logtmp))
+        return rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs, loss_perm_invar
+
 
 # Ray helpers
 def get_rays(H, W, focal, c2w):
