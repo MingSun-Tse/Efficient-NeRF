@@ -128,5 +128,6 @@ parser.add_argument('--teacher_ckpt', type=str,
 parser.add_argument('--lw_kd', type=float, default=0.001)
 parser.add_argument('--split_layer', type=int, default=-1)
 parser.add_argument('--dropout_layer', type=str, default='')
+parser.add_argument('--dropout_ratio', type=float, default=0.5)
 parser.add_argument('--use_group_conv', action="store_true")
 args = parser.parse_args()

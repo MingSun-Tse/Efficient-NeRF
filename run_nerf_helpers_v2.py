@@ -307,7 +307,7 @@ class NeRF_v2(nn.Module):
             for i, layer in enumerate(self.pts_linears):
                 h = F.relu(layer(h))
                 if i >= self.dropout_layer[0]:
-                    h = F.dropout(h)
+                    h = F.dropout(h, p=self.args.dropout_ratio)
                 if i in self.skips:
                     h = torch.cat([embedded_pts, h], dim=-1)
 
@@ -319,7 +319,7 @@ class NeRF_v2(nn.Module):
                 for i, layer in enumerate(self.views_linears):
                     h = F.relu(layer(h))
                     if i >= self.dropout_layer[1]:
-                        h = F.dropout(h)
+                        h = F.dropout(h, p=self.args.dropout_ratio)
                 rgb = self.rgb_linear(h)
                 raw = torch.cat([rgb, alpha], dim=-1)
                 raw = raw.view(n_ray, -1, 4) # [n_ray, n_sample_per_ray, 4]
