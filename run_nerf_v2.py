@@ -692,7 +692,7 @@ def train():
                 loss += img_loss
                 psnr = mse2psnr(img_loss)
                 loss_line.update('loss_rgb', img_loss.item(), '.4f')
-                loss_line.update('psnr', psnr.item(), '.2f')
+                loss_line.update('psnr', psnr.item(), '.4f')
                 if 'rgb0' in extras:
                     img_loss0 = img2mse(extras['rgb0'], target_s)
                     loss += img_loss0
@@ -706,7 +706,7 @@ def train():
                 loss += img_loss
                 psnr = mse2psnr(img_loss)
                 loss_line.update('loss_rgb', img_loss.item(), '.4f')
-                loss_line.update('psnr', psnr.item(), '.2f')
+                loss_line.update('psnr', psnr.item(), '.4f')
 
                 loss_kd = torch.Tensor([0]).to(device)
                 if args.teacher_ckpt:
@@ -725,7 +725,7 @@ def train():
             hist_loss = hist_loss * 0.95 + loss.item() * 0.05
             hist_psnr = hist_psnr * 0.95 + psnr.item() * 0.05
             loss_line.update('hist_loss', hist_loss, '.4f')
-            loss_line.update('hist_psnr', hist_psnr, '.2f')
+            loss_line.update('hist_psnr', hist_psnr, '.4f')
 
         # print logs of training
         if i % args.i_print == 0:
