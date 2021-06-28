@@ -167,8 +167,8 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
 
         rgbs.append(rgb.cpu().numpy())
         disps.append(disp.cpu().numpy())
-        if i==0:
-            print(rgb.shape, disp.shape)
+        # if i==0:
+        #     print(rgb.shape, disp.shape)
 
         """
         if gt_imgs is not None and render_factor==0:
@@ -205,7 +205,7 @@ def create_nerf(args):
     if args.use_viewdirs:
         embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
     output_ch = 5 if args.N_importance > 0 else 4
-    skips = [4] # @mst: the layer where a skip connection is added
+    skips = [int(x) for x in args.skips.split(',')] if args.skips else []
     # ********************************************************************
     # coarse model
     model = NeRF(D=args.netdepth, W=args.netwidth,
@@ -593,6 +593,9 @@ def config_parser():
     parser.add_argument('--test_interval', type=int, default=2000)
     parser.add_argument('--plot_interval', type=int, default=100000000)
     parser.add_argument('--save_interval', type=int, default=2000, help="the interval to save model")
+
+    # added arguments (do not add new functionalities, just to make the hyper-param tuning more flexible)
+    parser.add_argument('--skips', type=str, default='4')
 
     return parser
 

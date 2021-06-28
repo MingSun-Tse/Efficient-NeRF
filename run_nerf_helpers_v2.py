@@ -151,7 +151,7 @@ class NeRF_v2(nn.Module):
         self.near = near
         self.far = far
         D, W = args.netdepth, args.netwidth
-        self.skips = [int(x) for x in args.skips.split(',')]
+        self.skips = [int(x) for x in args.skips.split(',')] if args.skips else []
         self.print = print
 
         # positional embedding function
