@@ -468,7 +468,7 @@ def render_rays(ray_batch,
 
 # set up logging directories -------
 from logger import Logger
-from utils import Timer, check_path, LossLine
+from utils import Timer, check_path, LossLine, PresetLRScheduler, strdict_to_dict
 from option import args
 
 logger = Logger(args)
@@ -628,15 +628,21 @@ def train():
     timer = Timer((args.N_iters - start) / args.i_testset)
     hist_loss, hist_psnr = 0, 0
     global global_step
+    
+    if args.lr:
+        lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
     for i in trange(start + 1, args.N_iters + 1):
         global_step = i
 
         # update LR
-        decay_rate = 0.1
-        decay_steps = args.lrate_decay * 1000
-        new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = new_lrate
+        if args.lr: # use our own lr schedule
+            new_lrate = lr_scheduler(optimizer, global_step)
+        else:
+            decay_rate = 0.1
+            decay_steps = args.lrate_decay * 1000
+            new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = new_lrate
             
         # Sample random ray batch
         if use_batching: # @mst: False
@@ -746,7 +752,7 @@ def train():
                 print('Testing...')
                 *_, test_loss, test_psnr = render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], 
                     savedir=testsavedir)
-            accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} LR {new_lrate:.8f}')
+            accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} Train_HistPSNR {hist_psnr:.4f} LR {new_lrate:.8f}')
             print(f'Saved rendered test images: "{testsavedir}"')
             print(f'Predicted finish time: {timer()}')
 
