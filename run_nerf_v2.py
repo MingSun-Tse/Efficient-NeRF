@@ -19,6 +19,7 @@ from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data
 from collections import OrderedDict
+import copy
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -228,16 +229,24 @@ def create_nerf(args, near, far):
     
     # in KD, there is a pretrained teacher
     if args.teacher_ckpt:
-        teacher = NeRF(D=8, W=256, input_ch=63, output_ch=4, skips=[4], input_ch_views=27, 
+        teacher_fn = NeRF(D=8, W=256, input_ch=63, output_ch=4, skips=[4], input_ch_views=27, 
             use_viewdirs=args.use_viewdirs).to(device)
+        teacher_fine = NeRF(D=8, W=256, input_ch=63, output_ch=4, skips=[4], input_ch_views=27, 
+            use_viewdirs=args.use_viewdirs).to(device) # TODO: not use fixed arguments
+        
         # set to eval
-        teacher.eval()
-        for param in teacher.parameters():
+        teacher_fn.eval()
+        teacher_fine.eval()
+        for param in teacher_fn.parameters():
+            param.requires_grad = False
+        for param in teacher_fine.parameters():
             param.requires_grad = False
         
         # load weights
-        ckpt_path, _ = _load_weights(teacher, args.teacher_ckpt, 'network_fine_state_dict')
-        print('Load teacher ckpt successfully: "%s"' % ckpt_path)
+        ckpt_path, ckpt = _load_weights(teacher_fn, args.teacher_ckpt, 'network_fn_state_dict')
+        ckpt_path, ckpt = _load_weights(teacher_fine, args.teacher_ckpt, 'network_fine_state_dict')
+        test_psnr = 0.01
+        print(f'Load teacher ckpt successfully: "{ckpt_path}". Its test PSNR: {test_psnr:.4f}')
 
         # get network_query_fn
         embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
@@ -280,7 +289,8 @@ def create_nerf(args, near, far):
     }
 
     if args.teacher_ckpt:
-        render_kwargs_train['teacher'] = teacher
+        render_kwargs_train['teacher_fn'] = teacher_fn
+        render_kwargs_train['teacher_fine'] = teacher_fine
 
     # NDC only good for LLFF-style forward facing data
     if args.dataset_type != 'llff' or args.no_ndc:
@@ -296,7 +306,7 @@ def create_nerf(args, near, far):
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
 
 
-def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False):
+def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False, verbose=False):
     """Transforms model's predictions to semantically meaningful values.
     Args:
         raw: [num_rays, num_samples along ray, 4]. Prediction from model.
@@ -331,7 +341,7 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     alpha = raw2alpha(raw[...,3] + noise, dists)  # [N_rays, N_samples]
 
     # print to check alpha
-    if global_step % 100 == 0:
+    if verbose and global_step % args.i_print == 0:
         for i_ray in range(0, alpha.shape[0], 100):
             logtmp = ['%.4f' % x  for x in alpha[i_ray]]
             netprint('%4d: ' % i_ray + ' '.join(logtmp))
@@ -432,7 +442,7 @@ def render_rays(ray_batch,
 #     raw = run_network(pts)
     raw = network_query_fn(pts, viewdirs, network_fn)
 
-    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
+    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest, verbose=verbose)
 
     if N_importance > 0:
 
@@ -509,7 +519,7 @@ def train():
         print('NEAR FAR', near, far)
 
     elif args.dataset_type == 'blender':
-        images, poses, render_poses, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip)
+        images, poses, render_poses, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip, n_view=args.n_view)
         print('Loaded blender', images.shape, poses.shape, render_poses.shape, hwf, args.datadir)
         # Loaded blender (138, 400, 400, 4) (138, 4, 4) torch.Size([40, 4, 4]) [400, 400, 555.5555155968841] ./data/nerf_synthetic/lego
         i_train, i_val, i_test = i_split
@@ -626,13 +636,14 @@ def train():
     print('%d TEST views are' % len(i_test), i_test)
     print('%d VAL views are' % len(i_val), i_val)
     timer = Timer((args.N_iters - start) / args.i_testset)
-    hist_loss, hist_psnr = 0, 0
+    hist_loss, hist_psnr, n_teacher_labeled_sample = 0, 0, 0
     global global_step
     
     if args.lr:
         lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
     for i in trange(start + 1, args.N_iters + 1):
         global_step = i
+        loss_line = LossLine()
 
         # update LR
         if args.lr: # use our own lr schedule
@@ -658,10 +669,16 @@ def train():
                 rays_rgb = rays_rgb[rand_idx]
                 i_batch = 0
         else:
-            # Random from one image
+            # Random from one image                
             img_i = np.random.choice(i_train)
             target = images[img_i]
             pose = poses[img_i, :3, :4] # matrix 3x4
+            use_teacher_target = False
+            if args.kd_with_render_pose:
+                if torch.rand(1) <= render_poses.shape[0] / (render_poses.shape[0] + len(i_train)):
+                    rand_ix_ = np.random.permutation(len(render_poses))[0]
+                    pose = render_poses[rand_ix_]
+                    use_teacher_target = True
 
             if N_rand is not None:
                 rays_o, rays_d = get_rays(H, W, focal, torch.Tensor(pose))  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
@@ -685,10 +702,22 @@ def train():
                 rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 batch_rays = torch.stack([rays_o, rays_d], 0)
-                target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+                if use_teacher_target:
+                    # get target from a pretrained teacher
+                    render_kwargs_ = {x:v for x, v in render_kwargs_train.items()}
+                    render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
+                    render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
+                    render_kwargs_.pop('teacher_fn')
+                    render_kwargs_.pop('teacher_fine')
+                    target_s, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
+                                                        verbose=False, retraw=False,
+                                                        **render_kwargs_)
+                    n_teacher_labeled_sample += 1
+                else:
+                    target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+
             
             loss = 0
-            loss_line = LossLine()
             if args.model_name == 'nerf':
                 rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
                                                         verbose=i < 10, retraw=True,
@@ -722,15 +751,6 @@ def train():
                 psnr = mse2psnr(img_loss)
                 loss_line.update('loss_rgb', img_loss.item(), '.4f')
                 loss_line.update('psnr', psnr.item(), '.4f')
-
-                loss_kd = torch.Tensor([0]).to(device)
-                if args.teacher_ckpt:
-                    teacher = render_kwargs_train['teacher']
-                    network_query_fn = render_kwargs_train['network_query_fn']
-                    teacher_raw = network_query_fn(pts, viewdirs, teacher)
-                    loss_kd = F.mse_loss(raw, teacher_raw.detach())
-                    loss += loss_kd * args.lw_kd
-                    loss_line.update('loss_kd (*%s)' % args.lw_kd, loss_kd.item(), '.4f')
             
             optimizer.zero_grad()
             loss.backward()
@@ -744,6 +764,9 @@ def train():
 
         # print logs of training
         if i % args.i_print == 0:
+            if args.kd_with_render_pose:
+                ratio_ = n_teacher_labeled_sample / (i - start)
+                loss_line.update('teacher_labeled_sample_ratio', ratio_, '.2f')
             logstr = f"[TRAIN] Iter {i} " + loss_line.format()
             print(logstr)
             # tqdm.write(logstr)

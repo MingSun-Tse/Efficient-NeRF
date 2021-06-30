@@ -1,3 +1,4 @@
+from numpy.random import default_rng
 import configargparse
 parser = configargparse.ArgumentParser()
 parser.add_argument('--config', is_config_file=True, 
@@ -134,4 +135,7 @@ parser.add_argument('--n_perm_invar', type=int, default=0)
 parser.add_argument('--lw_perm_invar', type=float, default=0.001)
 parser.add_argument('--lr', type=str, default='')
 parser.add_argument('--directly_predict_rgb', action="store_true")
+parser.add_argument('--n_view', type=int, default=40,
+        help='num of views in rendering the video')
+parser.add_argument('--kd_with_render_pose', action="store_true")
 args = parser.parse_args()
