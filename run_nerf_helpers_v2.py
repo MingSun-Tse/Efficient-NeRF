@@ -336,9 +336,14 @@ class NeRF_v2(nn.Module):
             inv_rand_index = torch.argsort(rand_index)
             raw = raw[:, inv_rand_index]
 
-        # rendering equation
-        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False, global_step=global_step, print=self.print)
-        return rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs
+        # rendering
+        if self.args.directly_predict_rgb:
+            rgb_map = F.sigmoid(raw[..., :3].mean(dim=1)) # [n_ray, 3]
+            disp_map = rgb_map # placeholder
+            return rgb_map, disp_map
+        else: # use rendering equation
+            rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False, global_step=global_step, print=self.print)
+            return rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs
     
     def perm_invar_forward(self, rays_o, rays_d, global_step=-1, perturb=0):
         rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs = self.forward(rays_o, rays_d, global_step=global_step, perturb=perturb)

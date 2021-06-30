@@ -707,12 +707,16 @@ def train():
             elif args.model_name in ['nerf_v2']:
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
-                if args.n_perm_invar > 0:
-                    rgb, *_, raw, pts, viewdirs, loss_perm_invar = model.perm_invar_forward(rays_o, rays_d, global_step=global_step, perturb=perturb)
-                    loss += loss_perm_invar * args.lw_perm_invar
-                    loss_line.update('loss_perm_invar (*%s)' % args.lw_perm_invar, loss_perm_invar.item(), '.10f')
+                if args.directly_predict_rgb:
+                    rgb, *_ = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
                 else:
-                    rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
+                    if args.n_perm_invar > 0:
+                        rgb, *_, raw, pts, viewdirs, loss_perm_invar = model.perm_invar_forward(rays_o, rays_d, global_step=global_step, perturb=perturb)
+                        loss += loss_perm_invar * args.lw_perm_invar
+                        loss_line.update('loss_perm_invar (*%s)' % args.lw_perm_invar, loss_perm_invar.item(), '.10f')
+                    else:
+                        rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
+                
                 img_loss = img2mse(rgb, target_s)
                 loss += img_loss
                 psnr = mse2psnr(img_loss)
