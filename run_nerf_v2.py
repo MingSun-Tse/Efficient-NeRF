@@ -675,10 +675,14 @@ def train():
             pose = poses[img_i, :3, :4] # matrix 3x4
             use_teacher_target = False
             if args.kd_with_render_pose:
-                if torch.rand(1) <= render_poses.shape[0] / (render_poses.shape[0] + len(i_train)):
-                    rand_ix_ = np.random.permutation(len(render_poses))[0]
-                    pose = render_poses[rand_ix_]
+                if args.kd_with_render_pose_mode == 'partial_render_pose':
+                    if torch.rand(1) <= render_poses.shape[0] / (render_poses.shape[0] + len(i_train)):
+                        use_teacher_target = True
+                elif args.kd_with_render_pose_mode == 'all_render_pose':
                     use_teacher_target = True
+            if use_teacher_target:
+                rand_ix_ = np.random.permutation(len(render_poses))[0]
+                pose = render_poses[rand_ix_]
 
             if N_rand is not None:
                 rays_o, rays_d = get_rays(H, W, focal, torch.Tensor(pose))  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)

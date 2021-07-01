@@ -1,3 +1,4 @@
+from random import choice
 from numpy.random import default_rng
 import configargparse
 parser = configargparse.ArgumentParser()
@@ -138,4 +139,6 @@ parser.add_argument('--directly_predict_rgb', action="store_true")
 parser.add_argument('--n_view', type=int, default=40,
         help='num of views in rendering the video')
 parser.add_argument('--kd_with_render_pose', action="store_true")
+parser.add_argument('--kd_with_render_pose_mode', type=str, default='partial_render_pose', choices=['partial_render_pose', 'all_render_pose'],
+        help='all_render_pose: all the training poses are generated novel poses, not from training images')
 args = parser.parse_args()

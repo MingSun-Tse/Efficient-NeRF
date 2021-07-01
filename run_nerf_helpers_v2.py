@@ -338,7 +338,7 @@ class NeRF_v2(nn.Module):
 
         # rendering
         if self.args.directly_predict_rgb:
-            rgb_map = F.sigmoid(raw[..., :3].mean(dim=1)) # [n_ray, 3]
+            rgb_map = torch.sigmoid(raw[..., :3].mean(dim=1)) # [n_ray, 3]
             disp_map = rgb_map # placeholder
             return rgb_map, disp_map
         else: # use rendering equation
