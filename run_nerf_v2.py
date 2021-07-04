@@ -519,7 +519,8 @@ def train():
         print('NEAR FAR', near, far)
 
     elif args.dataset_type == 'blender':
-        images, poses, render_poses, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip, n_view=args.n_view)
+        images, poses, render_poses_kd, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip, n_view=args.n_view)
+        images, poses, render_poses, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip, n_view=100)
         print('Loaded blender', images.shape, poses.shape, render_poses.shape, hwf, args.datadir)
         # Loaded blender (138, 400, 400, 4) (138, 4, 4) torch.Size([40, 4, 4]) [400, 400, 555.5555155968841] ./data/nerf_synthetic/lego
         i_train, i_val, i_test = i_split
@@ -638,10 +639,11 @@ def train():
     timer = Timer((args.N_iters - start) / args.i_testset)
     hist_loss, hist_psnr, n_teacher_labeled_sample = 0, 0, 0
     global global_step
-    
+
     if args.lr:
         lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
     for i in trange(start + 1, args.N_iters + 1):
+        t0 = time.time()
         global_step = i
         loss_line = LossLine()
 
@@ -673,16 +675,17 @@ def train():
             img_i = np.random.choice(i_train)
             target = images[img_i]
             pose = poses[img_i, :3, :4] # matrix 3x4
+            
             use_teacher_target = False
             if args.kd_with_render_pose:
                 if args.kd_with_render_pose_mode == 'partial_render_pose':
-                    if torch.rand(1) <= render_poses.shape[0] / (render_poses.shape[0] + len(i_train)):
+                    if torch.rand(1) <= render_poses_kd.shape[0] / (render_poses_kd.shape[0] + len(i_train)):
                         use_teacher_target = True
                 elif args.kd_with_render_pose_mode == 'all_render_pose':
                     use_teacher_target = True
             if use_teacher_target:
-                rand_ix_ = np.random.permutation(len(render_poses))[0]
-                pose = render_poses[rand_ix_]
+                rand_ix_ = np.random.permutation(len(render_poses_kd))[0]
+                pose = render_poses_kd[rand_ix_]
 
             if N_rand is not None:
                 rays_o, rays_d = get_rays(H, W, focal, torch.Tensor(pose))  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
@@ -713,9 +716,11 @@ def train():
                     render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
                     render_kwargs_.pop('teacher_fn')
                     render_kwargs_.pop('teacher_fine')
+                    t_ = time.time()
                     target_s, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
                                                         verbose=False, retraw=False,
                                                         **render_kwargs_)
+                    t_teacher_rendering = time.time() - t_
                     n_teacher_labeled_sample += 1
                 else:
                     target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
@@ -738,6 +743,7 @@ def train():
                     psnr0 = mse2psnr(img_loss0)
 
             elif args.model_name in ['nerf_v2']:
+                t_ = time.time()
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
                 if args.directly_predict_rgb:
@@ -755,10 +761,13 @@ def train():
                 psnr = mse2psnr(img_loss)
                 loss_line.update('loss_rgb', img_loss.item(), '.4f')
                 loss_line.update('psnr', psnr.item(), '.4f')
+                t_forward = time.time() - t_
             
+            t_ = time.time()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            t_param_update = time.time() - t_
 
             # smoothing for log print
             hist_loss = hist_loss * 0.95 + loss.item() * 0.05
@@ -771,6 +780,10 @@ def train():
             if args.kd_with_render_pose:
                 ratio_ = n_teacher_labeled_sample / (i - start)
                 loss_line.update('teacher_labeled_sample_ratio', ratio_, '.2f')
+                loss_line.update('t_teacher_rendering', t_teacher_rendering, '.2f')
+            loss_line.update('t_forward', t_forward, '.2f')
+            loss_line.update('t_param_update', t_param_update, '.2f')
+            loss_line.update('t_total', time.time() - t0, '.2f')
             logstr = f"[TRAIN] Iter {i} " + loss_line.format()
             print(logstr)
             # tqdm.write(logstr)
@@ -781,9 +794,11 @@ def train():
             os.makedirs(testsavedir, exist_ok=True)
             with torch.no_grad():
                 print('Testing...')
+                t_ = time.time()
                 *_, test_loss, test_psnr = render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], 
                     savedir=testsavedir)
-            accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} Train_HistPSNR {hist_psnr:.4f} LR {new_lrate:.8f}')
+                t_test = time.time() - t_
+            accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} Train_HistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s')
             print(f'Saved rendered test images: "{testsavedir}"')
             print(f'Predicted finish time: {timer()}')
 
@@ -791,12 +806,13 @@ def train():
         if i % args.i_video == 0:
             with torch.no_grad():
                 print('Rendering video...')
+                t_ = time.time()
                 rgbs, disps, *_ = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
             moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
             rgb_path, disp_path = moviebase + 'rgb_%s.mp4' % ExpID, moviebase + 'disp_%s.mp4' % ExpID
             imageio.mimwrite(rgb_path, to8b(rgbs), fps=30, quality=8)
             imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
-            print(f'[VIDEO] Rendering done. Save video: "{rgb_path}"')
+            print(f'[VIDEO] Rendering done. Time {time.time() - t_}s. Save video: "{rgb_path}"')
 
         # save checkpoint
         if i % args.i_weights == 0:
