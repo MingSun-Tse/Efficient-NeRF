@@ -630,7 +630,25 @@ def train():
     poses = torch.Tensor(poses).to(device)
     if use_batching:
         rays_rgb = torch.Tensor(rays_rgb).to(device)
-    
+
+    # generate new data using trained NeRF
+    if args.teacher_ckpt and args.kd_with_render_pose:
+        render_kwargs_ = {x:v for x, v in render_kwargs_train.items()}
+        render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
+        render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
+        render_kwargs_.pop('teacher_fn')
+        render_kwargs_.pop('teacher_fine')
+        teacher_target = []
+        t_ = time.time()
+        for ix, pose in enumerate(render_poses_kd):
+            rays_o, rays_d = get_rays(H, W, focal, torch.Tensor(pose))
+            batch_rays = torch.stack([rays_o, rays_d], 0)
+            rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
+                                            verbose=False, retraw=False,
+                                            **render_kwargs_)
+            teacher_target.append(rgb)
+        print(f'Teacher rendering done ({len(render_poses_kd)} views). Time: {time.time() - t_}s')
+
     # training
     print('Begin training')
     print('%d TRAIN views are' % len(i_train), i_train)
@@ -642,6 +660,7 @@ def train():
 
     if args.lr:
         lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
+    
     for i in trange(start + 1, args.N_iters + 1):
         t0 = time.time()
         global_step = i
@@ -676,16 +695,17 @@ def train():
             target = images[img_i]
             pose = poses[img_i, :3, :4] # matrix 3x4
             
-            use_teacher_target = False
             if args.kd_with_render_pose:
+                use_teacher_target = False
                 if args.kd_with_render_pose_mode == 'partial_render_pose':
                     if torch.rand(1) <= render_poses_kd.shape[0] / (render_poses_kd.shape[0] + len(i_train)):
                         use_teacher_target = True
                 elif args.kd_with_render_pose_mode == 'all_render_pose':
                     use_teacher_target = True
-            if use_teacher_target:
-                rand_ix_ = np.random.permutation(len(render_poses_kd))[0]
-                pose = render_poses_kd[rand_ix_]
+                if use_teacher_target:
+                    rand_ix_ = np.random.permutation(len(render_poses_kd))[0]
+                    pose = render_poses_kd[rand_ix_]
+                    target = teacher_target[rand_ix_]
 
             if N_rand is not None:
                 rays_o, rays_d = get_rays(H, W, focal, torch.Tensor(pose))  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
@@ -709,21 +729,7 @@ def train():
                 rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 batch_rays = torch.stack([rays_o, rays_d], 0)
-                if use_teacher_target:
-                    # get target from a pretrained teacher
-                    render_kwargs_ = {x:v for x, v in render_kwargs_train.items()}
-                    render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
-                    render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
-                    render_kwargs_.pop('teacher_fn')
-                    render_kwargs_.pop('teacher_fine')
-                    t_ = time.time()
-                    target_s, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
-                                                        verbose=False, retraw=False,
-                                                        **render_kwargs_)
-                    t_teacher_rendering = time.time() - t_
-                    n_teacher_labeled_sample += 1
-                else:
-                    target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+                target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
 
             
             loss = 0
@@ -780,7 +786,6 @@ def train():
             if args.kd_with_render_pose:
                 ratio_ = n_teacher_labeled_sample / (i - start)
                 loss_line.update('teacher_labeled_sample_ratio', ratio_, '.2f')
-                loss_line.update('t_teacher_rendering', t_teacher_rendering, '.2f')
             loss_line.update('t_forward', t_forward, '.2f')
             loss_line.update('t_param_update', t_param_update, '.2f')
             loss_line.update('t_total', time.time() - t0, '.2f')
