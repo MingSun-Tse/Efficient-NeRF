@@ -34,7 +34,7 @@ def pose_spherical(theta, phi, radius):
     return c2w
 
 
-def load_blender_data(basedir, half_res=False, testskip=1, n_view=40):
+def load_blender_data(basedir, half_res=False, testskip=1, n_view=40, perturb=0.):
     splits = ['train', 'val', 'test']
     metas = {}
     for s in splits:
@@ -73,14 +73,15 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_view=40):
     camera_angle_x = float(meta['camera_angle_x'])
     focal = .5 * W / np.tan(.5 * camera_angle_x)
     
-    render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180,180, n_view+1)[:-1]], 0)
-    # --- @mst
-    # print(render_poses.shape) # shape [40, 4, 4]
-    # print(f'H, W: {H, W}') # H, W: (800, 800)
-    # print([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180,180,40+1)[:-1]])
-    # print(f'focal: {focal}') # focal: 1111.1110311937682
-    # exit() 
-    # --- @mst
+    # @mst: add noise jittering
+    angles = np.linspace(-180, 180, n_view+1)
+    if perturb > 0:
+        lower, upper = angles[..., :-1], angles[..., 1:]
+        t_rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
+        angles = lower + (upper - lower) * t_rand
+    else:
+        angles = angles[:-1]
+    render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in angles], 0)
 
     if half_res:
         H = H//2

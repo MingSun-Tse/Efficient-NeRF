@@ -477,6 +477,14 @@ def render_rays(ray_batch,
     return ret
 
 # set up logging directories -------
+def parse_expid_iter(path):
+    '''parse out experiment id and iteration for pretrained ckpt.
+    path example: Experiments/nerfv2__lego__S4W1024D32Skip8,16,24_DPRGB_KDWRenderPose100All_BS16384_SERVER142-20210704-150540/weights/200000.tar
+    '''
+    expid = 'SERVER' + path.split('_SERVER')[1].split('/')[0]
+    iter = path.split('/')[-1].split('.tar')[0]
+    return expid, iter
+
 from logger import Logger
 from utils import Timer, check_path, LossLine, PresetLRScheduler, strdict_to_dict
 from option import args
@@ -519,8 +527,8 @@ def train():
         print('NEAR FAR', near, far)
 
     elif args.dataset_type == 'blender':
-        images, poses, render_poses_kd, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip, n_view=args.n_view)
-        images, poses, render_poses, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip, n_view=100)
+        images, poses, render_poses_kd, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip, n_view=args.n_view, perturb=args.render_poses_perturb)
+        images, poses, render_poses, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip, n_view=args.n_view_test, perturb=args.render_poses_perturb)
         print('Loaded blender', images.shape, poses.shape, render_poses.shape, hwf, args.datadir)
         # Loaded blender (138, 400, 400, 4) (138, 4, 4) torch.Size([40, 4, 4]) [400, 400, 555.5555155968841] ./data/nerf_synthetic/lego
         i_train, i_val, i_test = i_split
@@ -595,13 +603,15 @@ def train():
             else:
                 # Default is smoother render_poses path
                 images = None
-            testsavedir = os.path.join(basedir, expname, 'renderonly_{}_{:06d}'.format('test' if args.render_test else 'path', start))
+            exp_id, iter = parse_expid_iter(args.pretrained_ckpt)
+            testsavedir = os.path.join(basedir, expname, 'renderonly_{}_{}'.format(exp_id, 'test' if args.render_test else 'path'))
             os.makedirs(testsavedir, exist_ok=True)
             
             print('Rendering video...')
             rgbs, *_, test_loss, test_psnr = render_path(render_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=images, savedir=testsavedir, render_factor=args.render_factor)
-            imageio.mimwrite(os.path.join(testsavedir, 'video.mp4'), to8b(rgbs), fps=30, quality=8)
-            print(f'[VIDEO] Rendering done. Save video: "{testsavedir}"')
+            video_path = os.path.join(testsavedir, f'video_{exp_id}_iter{iter}.mp4')
+            imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
+            print(f'[VIDEO] Rendering done. Save video: "{video_path}"')
             if args.render_test:
                 accprint(f'[TEST] Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
             return
