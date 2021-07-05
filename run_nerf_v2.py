@@ -135,7 +135,7 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
     return ret_list + [ret_dict]
 
 
-def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0):
+def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0, new_render_func=False):
     H, W, focal = hwf
     if render_factor!=0:
         # Render downsampled for speed
@@ -192,12 +192,11 @@ def _load_weights(model, ckpt_path, key):
         new_state_dict[k] = v
     model.load_state_dict(new_state_dict)
     return ckpt_path, ckpt
-    
+
 def create_nerf(args, near, far):
     """Instantiate NeRF's MLP model.
     """
     # set up model
-    global new_render_func; new_render_func = False
     model_fine = network_query_fn = None
     if args.model_name == 'nerf':
         embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
@@ -224,7 +223,6 @@ def create_nerf(args, near, far):
                                                                     netchunk=args.netchunk)
     elif args.model_name in ['nerf_v2']:
         model = NeRF_v2(args, near, far, print=netprint).to(device)
-        new_render_func = True
         grad_vars = list(model.parameters())
     
     # in KD, there is a pretrained teacher
@@ -245,8 +243,7 @@ def create_nerf(args, near, far):
         # load weights
         ckpt_path, ckpt = _load_weights(teacher_fn, args.teacher_ckpt, 'network_fn_state_dict')
         ckpt_path, ckpt = _load_weights(teacher_fine, args.teacher_ckpt, 'network_fine_state_dict')
-        test_psnr = 0.01
-        print(f'Load teacher ckpt successfully: "{ckpt_path}". Its test PSNR: {test_psnr:.4f}')
+        print(f'Load teacher ckpt successfully: "{ckpt_path}"')
 
         # get network_query_fn
         embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
@@ -267,13 +264,13 @@ def create_nerf(args, near, far):
         ckpt_path, ckpt = _load_weights(model, args.pretrained_ckpt, 'network_fn_state_dict')
         if model_fine is not None:
             _load_weights(model_fine, args.pretrained_ckpt, 'network_fine_state_dict')
+        print('Load pretrained ckpt successfully: "%s"' % ckpt_path)
         
         # resume optimizer and iteration number if necessary
         if args.resume:
             start = ckpt['global_step']
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
-
-        print('Load pretrained ckpt successfully: "%s"' % ckpt_path)
+            print('Resume optimizer successfully')
 
     # set up training args
     render_kwargs_train = {
@@ -590,6 +587,29 @@ def train():
     render_kwargs_train.update(bds_dict)
     render_kwargs_test.update(bds_dict)
 
+    if args.test_teacher:
+        assert args.teacher_ckpt
+        print('Testing teacher...')
+        render_kwargs_ = {x:v for x, v in render_kwargs_test.items()}
+        render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
+        render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
+        render_kwargs_.pop('teacher_fn')
+        render_kwargs_.pop('teacher_fine')
+        with torch.no_grad():
+            images_test = torch.Tensor(images[i_test]).to(device)
+            poses_test = torch.Tensor(np.array(poses[i_test])).to(device)
+            *_, test_loss, test_psnr = render_path(poses_test, hwf, 4096, render_kwargs_, gt_imgs=images_test, render_factor=args.render_factor)
+        print(f'Teacher test: Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
+
+    if args.test_pretrained:
+        print('Testing pretrained...')
+        new_render_func = True if args.model_name in ['nerf_v2'] else False
+        with torch.no_grad():
+            images_test = torch.Tensor(images[i_test]).to(device)
+            poses_test = torch.Tensor(np.array(poses[i_test])).to(device)
+            *_, test_loss, test_psnr = render_path(poses_test, hwf, 4096, render_kwargs_test, gt_imgs=images_test, render_factor=args.render_factor, new_render_func=new_render_func)
+        print(f'Pretrained test: Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
+
     # Move testing data to GPU
     render_poses = torch.Tensor(render_poses).to(device)
 
@@ -651,6 +671,7 @@ def train():
         teacher_target = []
         t_ = time.time()
         for ix, pose in enumerate(render_poses_kd):
+            print(f'[{ix}/{len(render_poses_kd)}] Using teacher to render more data...')
             rays_o, rays_d = get_rays(H, W, focal, torch.Tensor(pose))
             batch_rays = torch.stack([rays_o, rays_d], 0)
             rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
@@ -661,9 +682,9 @@ def train():
 
     # training
     print('Begin training')
-    print('%d TRAIN views are' % len(i_train), i_train)
-    print('%d TEST views are' % len(i_test), i_test)
-    print('%d VAL views are' % len(i_val), i_val)
+    # print('%d TRAIN views are' % len(i_train), i_train)
+    # print('%d TEST views are' % len(i_test), i_test)
+    # print('%d VAL views are' % len(i_val), i_val)
     timer = Timer((args.N_iters - start) / args.i_testset)
     hist_loss, hist_psnr, n_teacher_labeled_sample = 0, 0, 0
     global global_step

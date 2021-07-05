@@ -121,12 +121,14 @@ parser.add_argument('--D_head', type=int, default=4)
 parser.add_argument('--n_sample_per_ray', type=int, default=192)
 parser.add_argument('--encode_input', action='store_true')
 parser.add_argument('--pretrained_ckpt', type=str, default='')
+parser.add_argument('--test_pretrained', action="store_true")
 parser.add_argument('--resume', action="store_true", 
         help='if True, resume the optimizer')
 parser.add_argument('--learn_pts', action="store_true", 
         help='if True, learn sampling positions')
-parser.add_argument('--teacher_ckpt', type=str,
-        help='path of teacher checkpoint for knowledge distillation')
+parser.add_argument('--teacher_ckpt', type=str, default='',
+        help='path of teacher checkpoint for knowledge distillation. The only indicator for if using the teacher-student paradigm.')
+parser.add_argument('--test_teacher', action="store_true")
 parser.add_argument('--lw_kd', type=float, default=0.001)
 parser.add_argument('--split_layer', type=int, default=-1)
 parser.add_argument('--dropout_layer', type=str, default='')
