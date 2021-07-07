@@ -34,7 +34,7 @@ def pose_spherical(theta, phi, radius):
     return c2w
 
 
-def load_blender_data(basedir, half_res=False, testskip=1, n_view=40, perturb=0.):
+def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=False):
     splits = ['train', 'val', 'test']
     metas = {}
     for s in splits:
@@ -74,14 +74,29 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_view=40, perturb=0.
     focal = .5 * W / np.tan(.5 * camera_angle_x)
     
     # @mst: add noise jittering
-    angles = np.linspace(-180, 180, n_view+1)
-    if perturb > 0:
-        lower, upper = angles[..., :-1], angles[..., 1:]
-        t_rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
-        angles = lower + (upper - lower) * t_rand
+    if isinstance(n_pose, int):
+        thetas = np.linspace(-180, 180, n_pose + 1)
+        phis = [-30]
     else:
-        angles = angles[:-1]
-    render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in angles], 0)
+        thetas = np.linspace(-180, 180, n_pose[0] + 1)
+        phis = np.linspace(-90, 0, n_pose[1] + 1)
+    
+    if perturb:
+        lower, upper = thetas[..., :-1], thetas[..., 1:]
+        rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
+        thetas = lower + (upper - lower) * rand
+    else:
+        thetas = thetas[:-1]
+
+    if not isinstance(n_pose, int):
+        if perturb:
+            lower, upper = phis[..., :-1], phis[..., 1:]
+            rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
+            phis = lower + (upper - lower) * rand
+        else:
+            phis = phis[:-1]
+
+    render_poses = torch.stack([pose_spherical(t, p, 4) for t in thetas for p in phis], 0)
 
     if half_res:
         H = H//2
@@ -94,7 +109,4 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_view=40, perturb=0.
         imgs = imgs_half_res
         # imgs = tf.image.resize_area(imgs, [400, 400]).numpy()
 
-        
     return imgs, poses, render_poses, [H, W, focal], i_split
-
-
