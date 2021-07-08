@@ -17,7 +17,7 @@ from run_nerf_helpers_v2 import NeRF_v2, img2mse, mse2psnr, to8b, get_rays, get_
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data
+from load_blender import load_blender_data, pose_spherical
 from collections import OrderedDict
 import copy
 
@@ -493,13 +493,64 @@ netprint = logger.log_printer.netprint
 ExpID = logger.ExpID
 # ---------------------------------
 
-def get_novel_poses(args, n_pose, perturb):
+def get_novel_poses(args, n_pose, perturb, theta1=-180, theta2=180, phi1=-90, phi2=0, radius=4):
+    assert args.dataset_type in ['blender']
     if args.dataset_type == 'blender':
-        tmp = load_blender_data(args.datadir, args.half_res, args.testskip, n_pose=n_pose, perturb=perturb)
-        novel_poses = tmp[2]
-    else:
-        raise NotImplementedError
-    return torch.Tensor(novel_poses).to(device)
+        if isinstance(n_pose, int):
+            thetas = np.linspace(theta1, theta2, n_pose + 1)
+            phis = [-30]
+        else:
+            thetas = np.linspace(theta1, theta2, n_pose[0] + 1)
+            phis = np.linspace(phi1, phi2, n_pose[1] + 1)
+        
+        # theta perturb
+        if perturb:
+            lower, upper = thetas[..., :-1], thetas[..., 1:]
+            rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
+            thetas = lower + (upper - lower) * rand
+        else:
+            thetas = thetas[:-1]
+        
+        # phi perturb
+        if not isinstance(n_pose, int):
+            if perturb:
+                lower, upper = phis[..., :-1], phis[..., 1:]
+                rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
+                phis = lower + (upper - lower) * rand
+            else:
+                phis = phis[:-1]
+        novel_poses = torch.stack([pose_spherical(t, p, radius) for t in thetas for p in phis], 0).to(device)
+    return novel_poses
+
+def get_novel_poses_v2(args, n_pose, perturb, theta1=-180, theta2=180, phi1=-90, phi2=0, radius=4):
+    assert args.dataset_type in ['blender']
+    if args.dataset_type == 'blender':
+        if isinstance(n_pose, int):
+            thetas = np.linspace(theta1, theta2, n_pose + 1)
+            phis = [-30]
+        else:
+            thetas = np.linspace(theta1, theta2, n_pose[0] + 1)
+            phis = np.linspace(phi1, phi2, n_pose[1] + 1)
+        
+        # theta perturb
+        if perturb:
+            lower, upper = thetas[..., :-1], thetas[..., 1:]
+            rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
+            thetas = lower + (upper - lower) * rand
+        else:
+            thetas = thetas[:-1]
+        
+        # phi perturb
+        if not isinstance(n_pose, int):
+            if perturb:
+                lower, upper = phis[..., :-1], phis[..., 1:]
+                rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
+                phis = lower + (upper - lower) * rand
+            else:
+                phis = phis[:-1]
+        novel_poses = torch.stack([pose_spherical(t, p, radius) for t in thetas for p in phis], 0).to(device)
+    return novel_poses
+
 
 def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
@@ -588,15 +639,24 @@ def train():
 
     test_poses = torch.Tensor(poses[i_test]).to(device)
     test_images = torch.Tensor(images[i_test]).to(device)
-    # # check 
-    # video_poses = get_novel_poses(args, n_pose=args.n_pose_video, perturb=args.video_poses_perturb)
-    # print('Test poses:')
+    # # ------------- check poses
+    # netprint('=====> Test poses:')
     # for p in test_poses:
     #     netprint(p.data.cpu().numpy())
-    # print('Video poses:')
+    #     netprint(f'radius: {(p[:3, -1]).norm().item()}')
+    #     diff = torch.zeros((360, 90))
+    #     for i in range(360):
+    #         for j in range(90):
+    #             diff[i, j] = (pose_spherical(i-180, -j, 4.0311289) - p).norm()
+    #     netprint(f'its angle: {(diff.argmin()/90-180).item(), (-diff.argmin()%90).item()}, diff: {diff.min().item()}')
+    
+    # netprint('\n=====> Video poses:')
+    # video_poses = get_novel_poses(args, n_pose=args.n_pose_video, perturb=args.video_poses_perturb)
     # for p in video_poses[:20]:
     #     netprint(p.data.cpu().numpy())
+    #     netprint(f'radius: {(p[:3, -1]).norm().item()}')
     # exit()
+    # # -------------
 
     # Create log dir and copy the config file
     basedir = logger.exp_path # args.basedir @mst: use our experiment path

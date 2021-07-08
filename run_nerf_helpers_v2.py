@@ -365,6 +365,7 @@ class NeRF_v2(nn.Module):
 
 # Ray helpers
 def get_rays(H, W, focal, c2w):
+    focal = focal * 1.5
     i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H))  # pytorch's meshgrid has indexing='ij'
     i = i.t()
     j = j.t()
