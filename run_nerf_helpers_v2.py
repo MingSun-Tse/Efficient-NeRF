@@ -4,6 +4,7 @@ torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn 
 import torch.nn.functional as F
 import numpy as np
+from load_blender import pose_spherical
 
 # TODO: remove this dependency
 from torchsearchsorted import searchsorted
@@ -365,7 +366,6 @@ class NeRF_v2(nn.Module):
 
 # Ray helpers
 def get_rays(H, W, focal, c2w):
-    focal = focal * 1.5
     i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H))  # pytorch's meshgrid has indexing='ij'
     i = i.t()
     j = j.t()
@@ -394,3 +394,55 @@ def ndc_rays(H, W, focal, near, rays_o, rays_d):
     rays_d = torch.stack([d0,d1,d2], -1)
     
     return rays_o, rays_d
+
+def parse_expid_iter(path):
+    '''parse out experiment id and iteration for pretrained ckpt.
+    path example: Experiments/nerfv2__lego__S4W1024D32Skip8,16,24_DPRGB_KDWRenderPose100All_BS16384_SERVER142-20210704-150540/weights/200000.tar
+    '''
+    expid = 'SERVER' + path.split('_SERVER')[1].split('/')[0]
+    iter = path.split('/')[-1].split('.tar')[0]
+    return expid, iter
+
+def get_novel_poses(args, n_pose, perturb, theta1=-180, theta2=180, phi1=-90, phi2=0):
+    assert args.dataset_type in ['blender']
+    if args.dataset_type == 'blender':
+        near, far = 2, 6
+        if isinstance(n_pose, int):
+            thetas = np.linspace(theta1, theta2, n_pose+1)[:-1]
+            phis = [-30]
+            radiuses = [4]
+        else:
+            thetas = np.linspace(theta1, theta2, n_pose[0]+1)[:-1]
+            phis = np.linspace(phi1, phi2, n_pose[1])
+            radiuses = np.linspace(near, far, n_pose[2])
+        novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
+    return novel_poses
+
+def get_novel_poses_v2(args, n_pose, perturb, theta1=-180, theta2=180, phi1=-90, phi2=0, radius=4):
+    assert args.dataset_type in ['blender']
+    if args.dataset_type == 'blender':
+        if isinstance(n_pose, int):
+            thetas = np.linspace(theta1, theta2, n_pose + 1)
+            phis = [-30]
+        else:
+            thetas = np.linspace(theta1, theta2, n_pose[0] + 1)
+            phis = np.linspace(phi1, phi2, n_pose[1] + 1)
+        
+        # theta perturb
+        if perturb:
+            lower, upper = thetas[..., :-1], thetas[..., 1:]
+            rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
+            thetas = lower + (upper - lower) * rand
+        else:
+            thetas = thetas[:-1]
+        
+        # phi perturb
+        if not isinstance(n_pose, int):
+            if perturb:
+                lower, upper = phis[..., :-1], phis[..., 1:]
+                rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
+                phis = lower + (upper - lower) * rand
+            else:
+                phis = phis[:-1]
+        novel_poses = torch.stack([pose_spherical(t, p, radius) for t in thetas for p in phis], 0).to(device)
+    return novel_poses

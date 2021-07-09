@@ -96,7 +96,7 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=Fa
         else:
             phis = phis[:-1]
 
-    render_poses = torch.stack([pose_spherical(t, p, 4) for t in thetas for p in phis], 0)
+    render_poses = torch.stack([pose_spherical(t, p, 4) for p in phis for t in thetas], 0)
 
     if half_res:
         H = H//2

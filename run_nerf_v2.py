@@ -13,11 +13,12 @@ from tqdm import tqdm, trange
 import matplotlib.pyplot as plt
 
 from run_nerf_helpers import NeRF, sample_pdf
-from run_nerf_helpers_v2 import NeRF_v2, img2mse, mse2psnr, to8b, get_rays, get_embedder
+from run_nerf_helpers_v2 import NeRF_v2, img2mse, mse2psnr, to8b, get_rays, get_embedder, get_novel_poses, get_novel_poses_v2
+from run_nerf_helpers_v2 import parse_expid_iter
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data, pose_spherical
+from load_blender import load_blender_data
 from collections import OrderedDict
 import copy
 
@@ -474,14 +475,6 @@ def render_rays(ray_batch,
     return ret
 
 # set up logging directories -------
-def parse_expid_iter(path):
-    '''parse out experiment id and iteration for pretrained ckpt.
-    path example: Experiments/nerfv2__lego__S4W1024D32Skip8,16,24_DPRGB_KDWRenderPose100All_BS16384_SERVER142-20210704-150540/weights/200000.tar
-    '''
-    expid = 'SERVER' + path.split('_SERVER')[1].split('/')[0]
-    iter = path.split('/')[-1].split('.tar')[0]
-    return expid, iter
-
 from logger import Logger
 from utils import Timer, check_path, LossLine, PresetLRScheduler, strdict_to_dict
 from option import args
@@ -492,65 +485,6 @@ accprint = logger.log_printer.accprint
 netprint = logger.log_printer.netprint
 ExpID = logger.ExpID
 # ---------------------------------
-
-def get_novel_poses(args, n_pose, perturb, theta1=-180, theta2=180, phi1=-90, phi2=0, radius=4):
-    assert args.dataset_type in ['blender']
-    if args.dataset_type == 'blender':
-        if isinstance(n_pose, int):
-            thetas = np.linspace(theta1, theta2, n_pose + 1)
-            phis = [-30]
-        else:
-            thetas = np.linspace(theta1, theta2, n_pose[0] + 1)
-            phis = np.linspace(phi1, phi2, n_pose[1] + 1)
-        
-        # theta perturb
-        if perturb:
-            lower, upper = thetas[..., :-1], thetas[..., 1:]
-            rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
-            thetas = lower + (upper - lower) * rand
-        else:
-            thetas = thetas[:-1]
-        
-        # phi perturb
-        if not isinstance(n_pose, int):
-            if perturb:
-                lower, upper = phis[..., :-1], phis[..., 1:]
-                rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
-                phis = lower + (upper - lower) * rand
-            else:
-                phis = phis[:-1]
-        novel_poses = torch.stack([pose_spherical(t, p, radius) for t in thetas for p in phis], 0).to(device)
-    return novel_poses
-
-def get_novel_poses_v2(args, n_pose, perturb, theta1=-180, theta2=180, phi1=-90, phi2=0, radius=4):
-    assert args.dataset_type in ['blender']
-    if args.dataset_type == 'blender':
-        if isinstance(n_pose, int):
-            thetas = np.linspace(theta1, theta2, n_pose + 1)
-            phis = [-30]
-        else:
-            thetas = np.linspace(theta1, theta2, n_pose[0] + 1)
-            phis = np.linspace(phi1, phi2, n_pose[1] + 1)
-        
-        # theta perturb
-        if perturb:
-            lower, upper = thetas[..., :-1], thetas[..., 1:]
-            rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
-            thetas = lower + (upper - lower) * rand
-        else:
-            thetas = thetas[:-1]
-        
-        # phi perturb
-        if not isinstance(n_pose, int):
-            if perturb:
-                lower, upper = phis[..., :-1], phis[..., 1:]
-                rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
-                phis = lower + (upper - lower) * rand
-            else:
-                phis = phis[:-1]
-        novel_poses = torch.stack([pose_spherical(t, p, radius) for t in thetas for p in phis], 0).to(device)
-    return novel_poses
-
 
 def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
@@ -714,7 +648,7 @@ def train():
                 print(f'[TEST] Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
             else:
                 print(f'Rendering video...')
-                video_poses = get_novel_poses(args, n_pose=args.n_pose_video, perturb=args.video_poses_perturb)
+                video_poses = get_novel_poses(args, n_pose=args.n_pose_video, perturb=args.video_poses_perturb).to(device)
                 rgbs, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=None, savedir=testsavedir, render_factor=args.render_factor, new_render_func=new_render_func)
         video_path = os.path.join(testsavedir, f'video_{exp_id}_iter{iter}.mp4')
         imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
@@ -752,7 +686,7 @@ def train():
     
     # generate new data using trained NeRF
     if args.n_pose_kd is not None:
-        kd_poses = get_novel_poses(args, n_pose=args.n_pose_kd, perturb=False)
+        kd_poses = get_novel_poses(args, n_pose=args.n_pose_kd, perturb=False).to(device)
         teacher_target = get_teacher_target(kd_poses, H, W, focal, render_kwargs_train, args)
 
     # training
@@ -782,7 +716,7 @@ def train():
         if args.n_pose_kd is not None and args.kd_poses_update != 'once':
             if i % int(args.kd_poses_update) == 0:
                 print(f'Iter {i} Update teacher rendered images...')
-                kd_poses = get_novel_poses(args, n_pose=args.n_pose_kd, perturb=True)
+                kd_poses = get_novel_poses(args, n_pose=args.n_pose_kd, perturb=True).to(device)
                 teacher_target = get_teacher_target(kd_poses, H, W, focal, render_kwargs_train, args)
 
         # Sample random ray batch
@@ -914,7 +848,7 @@ def train():
 
         # test: using novel poses
         if i % args.i_video == 0:
-            video_poses = get_novel_poses(args, n_pose=args.n_pose_video, perturb=args.video_poses_perturb)
+            video_poses = get_novel_poses(args, n_pose=args.n_pose_video, perturb=args.video_poses_perturb).to(device)
             with torch.no_grad():
                 print(f'Iter {i} Rendering video...')
                 t_ = time.time()
