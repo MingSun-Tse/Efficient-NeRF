@@ -585,7 +585,7 @@ def train():
     #     netprint(f'its angle: {(diff.argmin()/90-180).item(), (-diff.argmin()%90).item()}, diff: {diff.min().item()}')
     
     # netprint('\n=====> Video poses:')
-    # video_poses = get_novel_poses(args, n_pose=args.n_pose_video, perturb=args.video_poses_perturb)
+    # video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
     # for p in video_poses[:20]:
     #     netprint(p.data.cpu().numpy())
     #     netprint(f'radius: {(p[:3, -1]).norm().item()}')
@@ -648,7 +648,7 @@ def train():
                 print(f'[TEST] Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
             else:
                 print(f'Rendering video...')
-                video_poses = get_novel_poses(args, n_pose=args.n_pose_video, perturb=args.video_poses_perturb).to(device)
+                video_poses = get_novel_poses(args, n_pose=args.n_pose_video).to(device)
                 rgbs, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=None, savedir=testsavedir, render_factor=args.render_factor, new_render_func=new_render_func)
         video_path = os.path.join(testsavedir, f'video_{exp_id}_iter{iter}.mp4')
         imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
@@ -686,7 +686,7 @@ def train():
     
     # generate new data using trained NeRF
     if args.n_pose_kd is not None:
-        kd_poses = get_novel_poses(args, n_pose=args.n_pose_kd, perturb=False).to(device)
+        kd_poses = get_novel_poses_v2(args, n_pose=args.n_pose_kd).to(device)
         teacher_target = get_teacher_target(kd_poses, H, W, focal, render_kwargs_train, args)
 
     # training
@@ -716,7 +716,7 @@ def train():
         if args.n_pose_kd is not None and args.kd_poses_update != 'once':
             if i % int(args.kd_poses_update) == 0:
                 print(f'Iter {i} Update teacher rendered images...')
-                kd_poses = get_novel_poses(args, n_pose=args.n_pose_kd, perturb=True).to(device)
+                kd_poses = get_novel_poses_v2(args, n_pose=args.n_pose_kd).to(device)
                 teacher_target = get_teacher_target(kd_poses, H, W, focal, render_kwargs_train, args)
 
         # Sample random ray batch
@@ -848,7 +848,7 @@ def train():
 
         # test: using novel poses
         if i % args.i_video == 0:
-            video_poses = get_novel_poses(args, n_pose=args.n_pose_video, perturb=args.video_poses_perturb).to(device)
+            video_poses = get_novel_poses(args, n_pose=args.n_pose_video).to(device)
             with torch.no_grad():
                 print(f'Iter {i} Rendering video...')
                 t_ = time.time()

@@ -403,8 +403,7 @@ def parse_expid_iter(path):
     iter = path.split('/')[-1].split('.tar')[0]
     return expid, iter
 
-def get_novel_poses(args, n_pose, perturb, theta1=-180, theta2=180, phi1=-90, phi2=0):
-    assert args.dataset_type in ['blender']
+def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
     if args.dataset_type == 'blender':
         near, far = 2, 6
         if isinstance(n_pose, int):
@@ -413,36 +412,19 @@ def get_novel_poses(args, n_pose, perturb, theta1=-180, theta2=180, phi1=-90, ph
             radiuses = [4]
         else:
             thetas = np.linspace(theta1, theta2, n_pose[0]+1)[:-1]
-            phis = np.linspace(phi1, phi2, n_pose[1])
-            radiuses = np.linspace(near, far, n_pose[2])
+            phis = np.linspace(phi1, phi2, n_pose[1]+2)[1: -1]
+            radiuses = np.linspace(near, far, n_pose[2]+2)[1: -1]
         novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
     return novel_poses
 
-def get_novel_poses_v2(args, n_pose, perturb, theta1=-180, theta2=180, phi1=-90, phi2=0, radius=4):
+def get_novel_poses_v2(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
+    '''Random sampling
+    '''
     assert args.dataset_type in ['blender']
     if args.dataset_type == 'blender':
-        if isinstance(n_pose, int):
-            thetas = np.linspace(theta1, theta2, n_pose + 1)
-            phis = [-30]
-        else:
-            thetas = np.linspace(theta1, theta2, n_pose[0] + 1)
-            phis = np.linspace(phi1, phi2, n_pose[1] + 1)
-        
-        # theta perturb
-        if perturb:
-            lower, upper = thetas[..., :-1], thetas[..., 1:]
-            rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
-            thetas = lower + (upper - lower) * rand
-        else:
-            thetas = thetas[:-1]
-        
-        # phi perturb
-        if not isinstance(n_pose, int):
-            if perturb:
-                lower, upper = phis[..., :-1], phis[..., 1:]
-                rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
-                phis = lower + (upper - lower) * rand
-            else:
-                phis = phis[:-1]
-        novel_poses = torch.stack([pose_spherical(t, p, radius) for t in thetas for p in phis], 0).to(device)
+        near, far = 2, 6
+        thetas = theta1 + np.random.rand(n_pose[0]) * (theta2 - theta1)
+        phis = phi1 + np.random.rand(n_pose[1]) * (phi2 - phi1)
+        radiuses = near + np.random.rand(n_pose[2]) * (far - near)
+        novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
     return novel_poses
