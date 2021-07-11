@@ -428,3 +428,31 @@ def get_novel_poses_v2(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
         radiuses = near + np.random.rand(n_pose[2]) * (far - near)
         novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
     return novel_poses
+
+def save_data(dataset_type, poses, images, data_file, print=print):
+    '''{data_file} is the json file path, e.g., 'data/nerf_synthetic/lego/transforms_train.json'
+    '''
+    import json, imageio, os
+    if dataset_type == 'blender':
+        with open(data_file) as f:
+            data = json.load(f)
+        frames = data['frames']
+        n_img = len(frames)
+
+        folder = os.path.split(data_file)[0] # example: 'data/nerf_synthetic/lego/'
+        for pose, img in zip(poses, images):
+            n_img += 1
+            img_path = './train/r_%d_pseudo' % (n_img - 1) # add the 'pseudo' suffix to differentiate it from real-world data
+            
+            # add new frame data to json
+            new_frame = {k:v for k,v in frames[0].items()}
+            new_frame['file_path'] = img_path
+            new_frame['transform_matrix'] = pose.data.cpu().numpy().tolist()
+            frames += [new_frame]
+
+            # save image
+            img_path = '%s/%s.png' % (folder, img_path)
+            imageio.imwrite(img_path, to8b(img.data.cpu().numpy()))
+            print(f'Save new data to "{img_path}". Total #images now: {n_img}')
+    
+    print('Save new data done!')

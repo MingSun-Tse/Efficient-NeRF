@@ -14,11 +14,11 @@ import matplotlib.pyplot as plt
 
 from run_nerf_helpers import NeRF, sample_pdf
 from run_nerf_helpers_v2 import NeRF_v2, img2mse, mse2psnr, to8b, get_rays, get_embedder, get_novel_poses, get_novel_poses_v2
-from run_nerf_helpers_v2 import parse_expid_iter
+from run_nerf_helpers_v2 import parse_expid_iter, save_data
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data
+from load_blender import load_blender_data, load_blender_data_v2
 from collections import OrderedDict
 import copy
 
@@ -548,6 +548,8 @@ def train():
             images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
         else:
             images = images[...,:3]
+        
+        json_train = '%s/transforms_train.json' % args.datadir
 
     elif args.dataset_type == 'deepvoxels':
 
@@ -688,6 +690,8 @@ def train():
     if args.n_pose_kd is not None:
         kd_poses = get_novel_poses_v2(args, n_pose=args.n_pose_kd).to(device)
         teacher_target = get_teacher_target(kd_poses, H, W, focal, render_kwargs_train, args)
+        save_data(args.dataset_type, kd_poses, teacher_target, json_train, print=print)
+        images, poses = load_blender_data_v2(args.datadir_kd, args.half_res)
 
     # training
     print('Begin training')
@@ -718,6 +722,7 @@ def train():
                 print(f'Iter {i} Update teacher rendered images...')
                 kd_poses = get_novel_poses_v2(args, n_pose=args.n_pose_kd).to(device)
                 teacher_target = get_teacher_target(kd_poses, H, W, focal, render_kwargs_train, args)
+                save_data(kd_poses, teacher_target)
 
         # Sample random ray batch
         if use_batching: # @mst: False

@@ -110,3 +110,24 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=Fa
         # imgs = tf.image.resize_area(imgs, [400, 400]).numpy()
 
     return imgs, poses, render_poses, [H, W, focal], i_split
+
+def load_blender_data_v2(basedir, half_res=False, white_bkgd=True, split='train'):
+    '''Load the data of a specific split'''
+    with open(os.path.join(basedir, 'transforms_{}.json'.format(split)), 'r') as fp:
+        meta = json.load(fp)
+
+    poses, imgs = [], []
+    for ix, frame in enumerate(meta['frames']):
+        fname = os.path.join(basedir, frame['file_path'] + '.png')
+        img = np.array(imageio.imread(fname)).astype(np.float32) / 255.
+        pose = np.array(frame['transform_matrix']).astype(np.float32)
+        
+        if 'pseudo' not in fname: # real-world data
+            if half_res:
+                H, W = img.shape[:2]
+                img = cv2.resize(img, (H//2, W//2), interpolation=cv2.INTER_AREA)
+            img = img[..., :3] * img[..., -1] + (1. - img[..., -1]) if white_bkgd else img[..., :3] 
+                
+        imgs.append(img)
+        poses.append(pose)
+    return np.array(imgs), np.array(poses)
