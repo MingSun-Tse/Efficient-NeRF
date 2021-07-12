@@ -5,7 +5,7 @@ import imageio
 import json
 import torch.nn.functional as F
 import cv2
-
+to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
 
 trans_t = lambda t : torch.Tensor([
     [1,0,0,0],
@@ -111,14 +111,66 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=Fa
 
     return imgs, poses, render_poses, [H, W, focal], i_split
 
-def load_blender_data_v2(basedir, half_res=False, white_bkgd=True, split='train'):
-    '''Load the data of a specific split'''
-    with open(os.path.join(basedir, 'transforms_{}.json'.format(split)), 'r') as fp:
+def setup_blender_datadir(datadir_old, datadir_new):
+    import shutil
+    if os.path.exists(datadir_new):
+        if os.path.isfile(datadir_new): 
+            os.remove(datadir_new)
+        else:
+            shutil.rmtree(datadir_new)
+        os.makedirs(datadir_new)
+    
+    # copy json file
+    shutil.copy(datadir_old + '/transforms_train.json', datadir_new)
+    
+    # create softlink for images
+    imgs = [x for x in os.listdir(datadir_old + '/train') if x.endswith('.png')]
+    os.makedirs(datadir_new + '/train')
+    cwd = os.getcwd()
+    os.chdir(datadir_new + '/train')
+    dirname_old = datadir_old.split('/')[-1]
+    for img in imgs:
+        print(os.getcwd())
+        print(f'../../{dirname_old}/train/{img} -> f{img}')
+        os.symlink(f'../../{dirname_old}/train/{img}', f'{img}')
+    os.chdir(cwd) # change back working directory
+    
+def save_blender_data(datadir, poses, images, split='train'):
+    '''Save pseudo data created by a trained nerf.'''
+    import json, imageio, os
+    json_file = '%s/transforms_%s.json' % (datadir, split)
+    with open(json_file) as f:
+        data = json.load(f)
+    
+    frames = data['frames']
+    n_img = len(frames)
+    folder = os.path.split(json_file)[0] # example: 'data/nerf_synthetic/lego/'
+    for pose, img in zip(poses, images):
+        n_img += 1
+        img_path = './%s/r_%d_pseudo' % (split, n_img-1) # add the 'pseudo' suffix to differentiate it from real-world data
+        
+        # add new frame data to json
+        new_frame = {k:v for k,v in frames[0].items()}
+        new_frame['file_path'] = img_path
+        new_frame['transform_matrix'] = pose.data.cpu().numpy().tolist()
+        frames += [new_frame]
+
+        # save image
+        img_path = '%s/%s.png' % (folder, img_path)
+        imageio.imwrite(img_path, to8b(img.data.cpu().numpy()))
+
+    with open(json_file, 'w') as f:
+        data['frames'] = frames
+        json.dump(data, f, indent=4)
+
+def load_blender_data_v2(datadir, half_res=False, white_bkgd=True, split='train'):
+    '''Load data with psuedo data'''
+    with open(os.path.join(datadir, 'transforms_{}.json'.format(split)), 'r') as fp:
         meta = json.load(fp)
 
     poses, imgs = [], []
     for ix, frame in enumerate(meta['frames']):
-        fname = os.path.join(basedir, frame['file_path'] + '.png')
+        fname = os.path.join(datadir, frame['file_path'] + '.png')
         img = np.array(imageio.imread(fname)).astype(np.float32) / 255.
         pose = np.array(frame['transform_matrix']).astype(np.float32)
         
