@@ -130,8 +130,8 @@ def setup_blender_datadir(datadir_old, datadir_new):
     os.chdir(datadir_new + '/train')
     dirname_old = datadir_old.split('/')[-1]
     for img in imgs:
-        print(os.getcwd())
-        print(f'../../{dirname_old}/train/{img} -> f{img}')
+        # print(os.getcwd())
+        # print(f'../../{dirname_old}/train/{img} -> f{img}')
         os.symlink(f'../../{dirname_old}/train/{img}', f'{img}')
     os.chdir(cwd) # change back working directory
     

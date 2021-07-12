@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 from run_nerf_helpers import NeRF, sample_pdf
 from run_nerf_helpers_v2 import NeRF_v2, img2mse, mse2psnr, to8b, get_rays, get_embedder, get_novel_poses, get_novel_poses_v2
-from run_nerf_helpers_v2 import parse_expid_iter, save_data
+from run_nerf_helpers_v2 import parse_expid_iter
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
@@ -670,36 +670,28 @@ def train():
         rays_rgb = rays_rgb.astype(np.float32)
         print('shuffle rays')
         np.random.shuffle(rays_rgb)
-
         print('done')
         i_batch = 0
 
     # Move training data to GPU
     images = torch.Tensor(images).to(device)
     poses = torch.Tensor(poses).to(device)
+    train_images, train_poses = images[i_train], poses[i_train]
+    n_original_img = len(train_images)
     if use_batching:
         rays_rgb = torch.Tensor(rays_rgb).to(device)
 
-    # set up lr scheduler
+    # @mst: use our own lr scheduler
     if args.lr:
         lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
     
-    # generate new data using trained NeRF
-    if args.n_pose_kd is not None:
-        kd_poses = get_novel_poses_v2(args, n_pose=args.n_pose_kd).to(device)
-        teacher_target = get_teacher_target(kd_poses, H, W, focal, render_kwargs_train, args)
-        datadir_kd_old, datadir_kd_new = args.datadir_kd.split(':')
-        save_data(datadir_kd_old, datadir_kd_new, args.dataset_type, kd_poses, teacher_target, print=print)
-        images, poses = load_blender_data_v2(datadir_kd_new, args.half_res, args.white_bkgd)
-        print(f'Reloaded data. Now #train samples: {len(images)}')
-
     # training
     print('Begin training')
     # print('%d TRAIN views are' % len(i_train), i_train)
     # print('%d TEST views are' % len(i_test), i_test)
     # print('%d VAL views are' % len(i_val), i_val)
     timer = Timer((args.N_iters - start) / args.i_testset)
-    hist_loss, hist_psnr, n_teacher_labeled_sample = 0, 0, 0
+    hist_loss, hist_psnr, n_new_img = 0, 0, 0
     global global_step
     for i in trange(start + 1, args.N_iters + 1):
         t0 = time.time()
@@ -719,10 +711,11 @@ def train():
         # update new data
         if args.n_pose_kd is not None and args.kd_poses_update != 'once':
             if i % int(args.kd_poses_update) == 0:
-                print(f'Iter {i} Update teacher rendered images...')
-                kd_poses = get_novel_poses_v2(args, n_pose=args.n_pose_kd).to(device)
-                teacher_target = get_teacher_target(kd_poses, H, W, focal, render_kwargs_train, args)
-                save_data(kd_poses, teacher_target)
+                t_ = time.time()
+                if args.dataset_type == 'blender':
+                    train_images, train_poses = load_blender_data_v2(args.datadir_kd.split(':')[1], args.half_res, args.white_bkgd, split='train')
+                train_images, train_poses = torch.Tensor(train_images).to(device), torch.Tensor(train_poses).to(device)
+                print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {len(train_images)}')
 
         # Sample random ray batch
         if use_batching: # @mst: False
@@ -738,23 +731,14 @@ def train():
                 rays_rgb = rays_rgb[rand_idx]
                 i_batch = 0
         else:
-            # Random from one image                
-            img_i = np.random.choice(i_train)
-            target = images[img_i]
-            pose = poses[img_i, :3, :4] # matrix 3x4
+            # Random from one image            
+            img_i = np.random.permutation(len(train_images))[0]
+            target = train_images[img_i]
+            pose = train_poses[img_i, :3, :4] # matrix 3x4
+            if img_i >= n_original_img:
+                n_new_img += 1
+            loss_line.update('new_img_ratio', n_new_img/(i-start), '.2f')
             
-            if args.n_pose_kd is not None:
-                use_teacher_target = False
-                if args.kd_with_render_pose_mode == 'partial_render_pose':
-                    if torch.rand(1) <= kd_poses.shape[0] / (kd_poses.shape[0] + len(i_train)):
-                        use_teacher_target = True
-                elif args.kd_with_render_pose_mode == 'all_render_pose':
-                    use_teacher_target = True
-                if use_teacher_target:
-                    rand_ix_ = np.random.permutation(len(kd_poses))[0]
-                    pose = kd_poses[rand_ix_]
-                    target = teacher_target[rand_ix_]
-
             if N_rand is not None:
                 rays_o, rays_d = get_rays(H, W, focal, torch.Tensor(pose))  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
 
