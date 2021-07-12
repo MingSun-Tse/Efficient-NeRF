@@ -429,20 +429,25 @@ def get_novel_poses_v2(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
         novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
     return novel_poses
 
-def save_data(dataset_type, poses, images, data_file, print=print):
+def save_data(base_dir, new_dir, dataset_type, poses, images, split='train', print=print):
     '''{data_file} is the json file path, e.g., 'data/nerf_synthetic/lego/transforms_train.json'
     '''
-    import json, imageio, os
+    import json, imageio, os, shutil
     if dataset_type == 'blender':
-        with open(data_file) as f:
+        if os.path.exists(new_dir):
+            shutil.rmtree(new_dir)
+        shutil.copytree(base_dir, new_dir) # copy to a new directory to avoid interefering the original data
+
+        json_file = '%s/transforms_%s.json' % (new_dir, split)
+        with open(json_file) as f:
             data = json.load(f)
+        
         frames = data['frames']
         n_img = len(frames)
-
-        folder = os.path.split(data_file)[0] # example: 'data/nerf_synthetic/lego/'
+        folder = os.path.split(json_file)[0] # example: 'data/nerf_synthetic/lego/'
         for pose, img in zip(poses, images):
             n_img += 1
-            img_path = './train/r_%d_pseudo' % (n_img - 1) # add the 'pseudo' suffix to differentiate it from real-world data
+            img_path = './%s/r_%d_pseudo' % (split, n_img-1) # add the 'pseudo' suffix to differentiate it from real-world data
             
             # add new frame data to json
             new_frame = {k:v for k,v in frames[0].items()}

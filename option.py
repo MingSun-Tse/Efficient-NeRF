@@ -148,6 +148,7 @@ parser.add_argument('--kd_with_render_pose_mode', type=str, default='partial_ren
         help='all_render_pose: all the training poses are generated novel poses, not from training images')
 parser.add_argument('--video_poses_perturb', action="store_true")
 parser.add_argument('--kd_poses_update', type=str, default='once')
+parser.add_argument('--datadir_kd', type=str, default='')
 args = parser.parse_args()
 
 def check_n_pose(n_pose):

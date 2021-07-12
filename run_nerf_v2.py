@@ -548,8 +548,6 @@ def train():
             images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
         else:
             images = images[...,:3]
-        
-        json_train = '%s/transforms_train.json' % args.datadir
 
     elif args.dataset_type == 'deepvoxels':
 
@@ -690,8 +688,10 @@ def train():
     if args.n_pose_kd is not None:
         kd_poses = get_novel_poses_v2(args, n_pose=args.n_pose_kd).to(device)
         teacher_target = get_teacher_target(kd_poses, H, W, focal, render_kwargs_train, args)
-        save_data(args.dataset_type, kd_poses, teacher_target, json_train, print=print)
-        images, poses = load_blender_data_v2(args.datadir_kd, args.half_res)
+        datadir_kd_old, datadir_kd_new = args.datadir_kd.split(':')
+        save_data(datadir_kd_old, datadir_kd_new, args.dataset_type, kd_poses, teacher_target, print=print)
+        images, poses = load_blender_data_v2(datadir_kd_new, args.half_res, args.white_bkgd)
+        print(f'Reloaded data. Now #train samples: {len(images)}')
 
     # training
     print('Begin training')

@@ -126,7 +126,7 @@ def load_blender_data_v2(basedir, half_res=False, white_bkgd=True, split='train'
             if half_res:
                 H, W = img.shape[:2]
                 img = cv2.resize(img, (H//2, W//2), interpolation=cv2.INTER_AREA)
-            img = img[..., :3] * img[..., -1] + (1. - img[..., -1]) if white_bkgd else img[..., :3] 
+            img = img[..., :3] * img[..., -1:] + (1. - img[..., -1:]) if white_bkgd else img[..., :3] 
                 
         imgs.append(img)
         poses.append(pose)
