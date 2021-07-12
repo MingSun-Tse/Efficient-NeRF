@@ -621,7 +621,7 @@ def train():
     n_new_pose = len(kd_poses)
     rand_ix = np.random.permutation(n_new_pose)
     kd_poses = kd_poses[rand_ix] # shuffle
-    print('Get new poses, done!')
+    print(f'Get new poses, done! Total num of new poses: {n_new_pose}')
 
     # render pseduo data
     batch_size = 100
@@ -631,7 +631,7 @@ def train():
         n_img += len(poses)
         teacher_target = get_teacher_target(poses, H, W, focal, render_kwargs_train, args)
         if args.dataset_type == 'blender':
-            save_blender_data(datadir_kd_new, kd_poses, teacher_target)
+            save_blender_data(datadir_kd_new, poses, teacher_target)
         print(f'Create new data. Save to "{datadir_kd_new}". Now total #train samples: {n_img}')
     # ---
     
