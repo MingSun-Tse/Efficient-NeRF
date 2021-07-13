@@ -229,6 +229,7 @@ class BlenderDataset(Dataset):
                 self.frames.append(frames[ix]) 
             
     def __getitem__(self, index):
+        index = index % (len(self.frames))
         frame = self.frames[index]
         pose = torch.Tensor(frame['transform_matrix'])
         fname = os.path.join(self.datadir, frame['file_path'] + '.npy') # 'file_path' includes file extension

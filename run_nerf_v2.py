@@ -508,14 +508,34 @@ def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     print(f'Teacher rendering done ({len(poses)} views). Time: {(time.time() - t_):.2f}s')
     return teacher_target
 
+def InfiniteSampler(n):
+    order = np.random.permutation(n)
+    i = 0
+    while True:
+        yield order[i]
+        i += 1
+        if i == n:
+            order = np.random.permutation(n)
+            i = 0
+
+from torch.utils import data
+class InfiniteSamplerWrapper(data.sampler.Sampler):
+    def __init__(self, num_samples):
+        self.num_samples = num_samples
+    def __iter__(self):
+        return iter(InfiniteSampler(self.num_samples))
+    def __len__(self):
+        return 2 ** 31
+
 def get_dataloader(dataset_type, datadir, pseudo_ratio=0.5):
     if dataset_type == 'blender':
         trainset = BlenderDataset(datadir, pseudo_ratio)
         trainloader = torch.utils.data.DataLoader(dataset=trainset, 
                 batch_size=1,
-                shuffle=True, 
                 num_workers=4,
-                pin_memory=True)
+                pin_memory=True,
+                sampler=InfiniteSamplerWrapper(len(trainset))
+        )
     return iter(trainloader), len(trainset)
 
 def get_pseudo_ratio(schedule, current_step):
@@ -774,7 +794,7 @@ def train():
         else:
             # Reload data if necessary
             if args.datadir_kd:
-                if n_seen_img == n_total_img or i % args.i_update_data == 0: # update trainloader, possibly load more data
+                if i % args.i_update_data == 0: # update trainloader, possibly load more data
                     t_ = time.time()
                     pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
                     trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
