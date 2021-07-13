@@ -5,6 +5,7 @@ import imageio
 import json
 import torch.nn.functional as F
 import cv2
+from torch.utils.data import Dataset
 to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
 
 trans_t = lambda t : torch.Tensor([
@@ -135,7 +136,7 @@ def setup_blender_datadir(datadir_old, datadir_new):
         os.symlink(f'../../{dirname_old}/train/{img}', f'{img}')
     os.chdir(cwd) # change back working directory
 
-def setup_blender_datadir_v2(datadir_old, datadir_new):
+def setup_blender_datadir_v2(datadir_old, datadir_new, half_res=False, white_bkgd=True):
     '''Set up datadir and save data as .npy.
     '''
     import shutil
@@ -154,7 +155,11 @@ def setup_blender_datadir_v2(datadir_old, datadir_new):
     os.makedirs(f'{datadir_new}/train')
     for img in imgs:
         rgb = imageio.imread(f'{datadir_old}/train/{img}')
-        rgb = np.array(rgb)
+        rgb = np.array(rgb) / 255.
+        if half_res:
+            H, W = rgb.shape[:2]
+            rgb = cv2.resize(rgb, (H//2, W//2), interpolation=cv2.INTER_AREA)
+        rgb = rgb[..., :3] * rgb[..., -1:] + (1. - rgb[..., -1:]) if white_bkgd else rgb[..., :3] 
         np.save(f"{datadir_new}/train/{img.replace('.png', '.npy')}", rgb)
 
 def save_blender_data(datadir, poses, images, split='train'):
@@ -212,7 +217,6 @@ def is_img(x):
     _, ext = os.path.splitext(x)
     return ext.lower() in ['.png', '.jpeg', '.jpg', '.bmp', '.npy']
 
-from torch.utils.data import Dataset
 class BlenderDataset(Dataset):
     def __init__(self, datadir, split='train'):
         self.datadir = datadir

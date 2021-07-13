@@ -13,12 +13,12 @@ from tqdm import tqdm, trange
 import matplotlib.pyplot as plt
 
 from run_nerf_helpers import NeRF, sample_pdf, ndc_rays
-from run_nerf_helpers_v2 import NeRF_v2, img2mse, mse2psnr, to8b, get_rays, get_embedder, get_novel_poses
-from run_nerf_helpers_v2 import parse_expid_iter
+from run_nerf_helpers_v2 import NeRF_v2, get_rays, get_embedder, get_novel_poses
+from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, mse2psnr, to8b, img2mse
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data, load_blender_data_v2
+from load_blender import load_blender_data, BlenderDataset
 from collections import OrderedDict
 import copy
 
@@ -26,6 +26,7 @@ import copy
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
 DEBUG = False
+
 
 def batchify(fn, chunk):
     """Constructs a version of 'fn' that applies to smaller batches.
@@ -137,6 +138,8 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
 
 
 def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0, new_render_func=False):
+    render_poses = to_tensor(render_poses)
+
     H, W, focal = hwf
     if render_factor!=0:
         # Render downsampled for speed
@@ -149,7 +152,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         if new_render_func: # our new rendering func
             model = render_kwargs['network_fn']
             perturb = render_kwargs['perturb']
-            rays_o, rays_d = get_rays(H, W, focal, torch.Tensor(c2w))
+            rays_o, rays_d = get_rays(H, W, focal, c2w)
             rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3)
             rgb, disp = [], []
             for ix in range(0, rays_o.shape[0], chunk):
@@ -223,7 +226,7 @@ def create_nerf(args, near, far):
                                                                     embeddirs_fn=embeddirs_fn,
                                                                     netchunk=args.netchunk)
     elif args.model_name in ['nerf_v2']:
-        model = NeRF_v2(args, near, far, print=netprint).to(device)
+        model = NeRF_v2(args, near, far, device=device, print=netprint).to(device)
         grad_vars = list(model.parameters())
     
     # in KD, there is a pretrained teacher
@@ -505,6 +508,15 @@ def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     print(f'Teacher rendering done ({len(poses)} views). Time: {(time.time() - t_):.2f}s')
     return teacher_target
 
+def get_dataloader(dataset_type, datadir):
+    if dataset_type == 'blender':
+        trainset = BlenderDataset(datadir)
+        trainloader = torch.utils.data.DataLoader(dataset=trainset, 
+                batch_size=1,
+                shuffle=True, 
+                pin_memory=True)
+    return iter(trainloader), len(trainset)
+
 def train():
     # Load data
     if args.dataset_type == 'llff':
@@ -652,7 +664,7 @@ def train():
                     video_poses = torch.Tensor(render_poses).to(device)
                 print(f'Rendering video... (n_pose: {len(video_poses)})')
                 rgbs, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=None, savedir=testsavedir, render_factor=args.render_factor, new_render_func=new_render_func)
-        video_path = os.path.join(testsavedir, f'video_{exp_id}_iter{iter}.mp4')
+        video_path = os.path.join(testsavedir, f'video_pose{args.n_pose_video}_{exp_id}_iter{iter}.mp4')
         imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
         print(f'Save video: "{video_path}"')
         exit()
@@ -686,15 +698,19 @@ def train():
     # @mst: use our own lr scheduler
     if args.lr:
         lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
+                    
+    # use dataloader for training
+    if args.datadir_kd:
+        trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
     
     # training
-    print('Begin training')
-    print('%d TRAIN views are' % len(i_train), i_train)
-    print('%d TEST views are' % len(i_test), i_test)
-    print('%d VAL views are' % len(i_val), i_val)
-    timer = Timer((args.N_iters - start) / args.i_testset)
-    hist_loss, hist_psnr, n_new_img = 0, 0, 0
+    print(f'{len(i_train)} original train views are [{" ".join([str(x) for x in i_train])}]')
+    print(f'{len(i_test)} test views are [{" ".join([str(x) for x in i_train])}]')
+    print(f'{len(i_val)} test views are [{" ".join([str(x) for x in i_val])}]')
+    timer = Timer((args.N_iters - start) // args.i_testset)
+    hist_loss, hist_psnr, n_new_img, n_seen_img = 0, 0, 0, 0
     global global_step
+    print('Begin training')
     for i in trange(start + 1, args.N_iters + 1):
         t0 = time.time()
         global_step = i
@@ -710,14 +726,13 @@ def train():
             for param_group in optimizer.param_groups:
                 param_group['lr'] = new_lrate
 
-        # update new data
-        if args.n_pose_kd is not None and args.kd_poses_update != 'once':
-            if i % int(args.kd_poses_update) == 0:
-                t_ = time.time()
-                if args.dataset_type == 'blender':
-                    train_images, train_poses = load_blender_data_v2(args.datadir_kd.split(':')[1], args.half_res, args.white_bkgd, split='train')
-                train_images, train_poses = torch.Tensor(train_images).to(device), torch.Tensor(train_poses).to(device)
-                print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {len(train_images)}')
+        # # update new data
+        # if args.n_pose_kd is not None and args.kd_poses_update != 'once':
+        #     if i % int(args.kd_poses_update) == 0:
+        #         t_ = time.time()
+        #         train_images, train_poses = load_blender_data_v2(args.datadir_kd.split(':')[1], args.half_res, args.white_bkgd, split='train')
+        #         train_images, train_poses = torch.Tensor(train_images).to(device), torch.Tensor(train_poses).to(device)
+        #         print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {len(train_images)}')
 
         # Sample random ray batch
         if use_batching: # @mst: False
@@ -733,16 +748,25 @@ def train():
                 rays_rgb = rays_rgb[rand_idx]
                 i_batch = 0
         else:
-            # Random from one image            
-            img_i = np.random.permutation(len(train_images))[0]
-            target = train_images[img_i]
-            pose = train_poses[img_i, :3, :4] # matrix 3x4
+            # Random from one image
+            target, pose, img_i = [x[0] for x in trainloader.next()] # batch size = 1
+            target, pose = target.to(device), pose.to(device)
+            pose = pose[:3, :4]
+            n_seen_img += 1
+            if n_seen_img == n_total_img: # update trainloader, possibly load more data
+                trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
+                n_seen_img = 0
+
+            # img_i = np.random.permutation(len(train_images))[0]
+            # target = train_images[img_i]
+            # pose = train_poses[img_i, :3, :4] # matrix 3x4
+
             if img_i >= n_original_img:
                 n_new_img += 1
-            loss_line.update('new_img_ratio', n_new_img/(i-start), '.2f')
+            loss_line.update('new_img_ratio', n_new_img/(i-start), '.4f')
             
             if N_rand is not None:
-                rays_o, rays_d = get_rays(H, W, focal, torch.Tensor(pose))  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
+                rays_o, rays_d = get_rays(H, W, focal, pose)  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
 
                 if i < args.precrop_iters:
                     dH = int(H//2 * args.precrop_frac)
@@ -795,6 +819,7 @@ def train():
                     else:
                         rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
                 
+                # print(rays_o.shape, rays_d.shape, rgb.shape, target_s.shape, img_i) # check shape
                 img_loss = img2mse(rgb, target_s)
                 loss += img_loss
                 psnr = mse2psnr(img_loss)
@@ -825,7 +850,7 @@ def train():
 
         # test: using the splitted test images
         if i % args.i_testset == 0:
-            testsavedir = os.path.join(basedir, expname, f'testset_iter{i}')
+            testsavedir = f'{logger.gen_img_path}/testset_{ExpID}_iter{i}' # save the renderred test images
             os.makedirs(testsavedir, exist_ok=True)
             with torch.no_grad():
                 print(f'Iter {i} Testing...')
@@ -847,11 +872,10 @@ def train():
                 print(f'Iter {i} Rendering video... (n_pose: {len(video_poses)})')
                 t_ = time.time()
                 rgbs, disps, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, new_render_func=new_render_func)
-            moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
-            rgb_path, disp_path = moviebase + 'rgb_%s.mp4' % ExpID, moviebase + 'disp_%s.mp4' % ExpID
-            imageio.mimwrite(rgb_path, to8b(rgbs), fps=30, quality=8)
-            imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
-            print(f'[VIDEO] Rendering done. Time {(time.time() - t_):.2f}s. Save video: "{rgb_path}"')
+            video_path = f'{logger.gen_img_path}/video_pose{args.n_pose_video}_{ExpID}_iter{i}.mp4'
+            imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
+            # imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
+            print(f'[VIDEO] Rendering done. Time {(time.time() - t_):.2f}s. Save video: "{video_path}"')
 
         # save checkpoint
         if i % args.i_weights == 0:
@@ -864,5 +888,5 @@ def train():
             print(f'Iter {i} Save checkpoint: "{path}"')
 
 if __name__=='__main__':
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')
+    # torch.set_default_tensor_type('torch.cuda.FloatTensor')
     train()

@@ -149,6 +149,7 @@ parser.add_argument('--kd_with_render_pose_mode', type=str, default='partial_ren
 parser.add_argument('--video_poses_perturb', action="store_true")
 parser.add_argument('--kd_poses_update', type=str, default='once')
 parser.add_argument('--datadir_kd', type=str, default='')
+parser.add_argument('--create_data_chunk', type=int, default=100)
 args = parser.parse_args()
 
 def check_n_pose(n_pose):

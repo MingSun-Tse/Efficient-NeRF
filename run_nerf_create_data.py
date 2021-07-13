@@ -221,7 +221,7 @@ def create_nerf(args, near, far):
                                                                     embeddirs_fn=embeddirs_fn,
                                                                     netchunk=args.netchunk)
     elif args.model_name in ['nerf_v2']:
-        model = NeRF_v2(args, near, far, print=netprint).to(device)
+        model = NeRF_v2(args, near, far, device=device, print=netprint).to(device)
         grad_vars = list(model.parameters())
     
     # in KD, there is a pretrained teacher
@@ -613,7 +613,7 @@ def train():
 
     # --- generate new data using trained NeRF
     datadir_kd_old, datadir_kd_new = args.datadir_kd.split(':')
-    setup_blender_datadir(datadir_kd_old, datadir_kd_new)
+    setup_blender_datadir(datadir_kd_old, datadir_kd_new, args.half_res, args.white_bkgd)
     print('Set up new data directory, done!')
 
     # get poses of psuedo data

@@ -11,7 +11,9 @@ from torchsearchsorted import searchsorted
 
 # Misc
 img2mse = lambda x, y : torch.mean((x - y) ** 2)
-mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
+mse2psnr = lambda x : -10. * torch.log(x).cuda() / torch.log(torch.Tensor([10.])).cuda()
+to_tensor = lambda x: x.cuda() if isinstance(x, torch.Tensor) else torch.Tensor(x).cuda()
+to_nparray = lambda x: x if isinstance(x, np.array) else x.data.cpu().numpy()
 to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
 
 # Positional encoding (section 5.1)
@@ -146,7 +148,7 @@ def run_network(inputs, viewdirs, fn, embed_fn, embeddirs_fn, netchunk=1024*64):
 class NeRF_v2(nn.Module):
     '''New idea: one forward to get multi-outputs.
     '''
-    def __init__(self, args, near, far, print=print):
+    def __init__(self, args, near, far, device, print=print):
         super(NeRF_v2, self).__init__()
         self.args = args
         self.near = near
@@ -154,6 +156,7 @@ class NeRF_v2(nn.Module):
         D, W = args.netdepth, args.netwidth
         self.skips = [int(x) for x in args.skips.split(',')] if args.skips else []
         self.print = print
+        self.device = device
 
         # positional embedding function
         self.embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
@@ -242,7 +245,7 @@ class NeRF_v2(nn.Module):
                 self.print('t_vals: ' + ' '.join(logtmp))
             z_vals = self.near * (1 - t_vals) + self.far * t_vals # depth, [n_ray, n_sample]
         else:
-            t_vals = torch.linspace(0., 1., steps=n_sample)
+            t_vals = torch.linspace(0., 1., steps=n_sample).to(self.device)
             t_vals = t_vals[None, :].expand(n_ray, n_sample)
             z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
             if perturb > 0.:
@@ -251,7 +254,7 @@ class NeRF_v2(nn.Module):
                 upper = torch.cat([mids, z_vals[...,-1:]], -1)
                 lower = torch.cat([z_vals[...,:1], mids], -1)
                 # stratified samples in those intervals
-                t_rand = torch.rand(z_vals.shape) # uniform dist [0, 1)
+                t_rand = torch.rand(z_vals.shape).to(self.device) # uniform dist [0, 1)
                 z_vals = lower + (upper - lower) * t_rand
         
         # get sample coordinates
@@ -366,9 +369,9 @@ class NeRF_v2(nn.Module):
 
 # Ray helpers
 def get_rays(H, W, focal, c2w):
-    i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H))  # pytorch's meshgrid has indexing='ij'
-    i = i.t()
-    j = j.t()
+    i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H)) # pytorch's meshgrid has indexing='ij'
+    i = i.t().cuda()
+    j = j.t().cuda()
     dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1)
     # Rotate ray directions from camera frame to the world frame
     rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
