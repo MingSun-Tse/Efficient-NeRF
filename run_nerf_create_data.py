@@ -617,7 +617,7 @@ def train():
     print('Set up new data directory, done!')
 
     # get poses of psuedo data
-    kd_poses = get_novel_poses_v2(args, n_pose=args.n_pose_kd).to(device)
+    kd_poses = get_novel_poses(args, n_pose=args.n_pose_kd).to(device)
     n_new_pose = len(kd_poses)
     rand_ix = np.random.permutation(n_new_pose)
     kd_poses = kd_poses[rand_ix] # shuffle
