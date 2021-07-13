@@ -415,6 +415,10 @@ def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
             phis = np.linspace(phi1, phi2, n_pose[1]+2)[1: -1]
             radiuses = np.linspace(near, far, n_pose[2]+2)[1: -1]
         novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
+    
+    elif args.dataset_type == 'llff':
+        pass
+
     return novel_poses
 
 def get_novel_poses_v2(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):

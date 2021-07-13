@@ -12,8 +12,8 @@ from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
 
-from run_nerf_helpers import NeRF, sample_pdf
-from run_nerf_helpers_v2 import NeRF_v2, img2mse, mse2psnr, to8b, get_rays, get_embedder, get_novel_poses, get_novel_poses_v2
+from run_nerf_helpers import NeRF, sample_pdf, ndc_rays
+from run_nerf_helpers_v2 import NeRF_v2, img2mse, mse2psnr, to8b, get_rays, get_embedder, get_novel_poses
 from run_nerf_helpers_v2 import parse_expid_iter
 
 from load_llff import load_llff_data
@@ -529,7 +529,6 @@ def train():
         if args.no_ndc:
             near = np.ndarray.min(bds) * .9
             far = np.ndarray.max(bds) * 1.
-            
         else:
             near = 0.
             far = 1.
@@ -647,8 +646,11 @@ def train():
                 rgbs, *_, test_loss, test_psnr = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, savedir=testsavedir, render_factor=args.render_factor, new_render_func=new_render_func)
                 print(f'[TEST] Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
             else:
-                print(f'Rendering video...')
-                video_poses = get_novel_poses(args, n_pose=args.n_pose_video).to(device)
+                if args.dataset_type == 'blender':
+                    video_poses = get_novel_poses(args, n_pose=args.n_pose_video).to(device)
+                else:
+                    video_poses = torch.Tensor(render_poses).to(device)
+                print(f'Rendering video... (n_pose: {len(video_poses)})')
                 rgbs, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=None, savedir=testsavedir, render_factor=args.render_factor, new_render_func=new_render_func)
         video_path = os.path.join(testsavedir, f'video_{exp_id}_iter{iter}.mp4')
         imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
@@ -687,9 +689,9 @@ def train():
     
     # training
     print('Begin training')
-    # print('%d TRAIN views are' % len(i_train), i_train)
-    # print('%d TEST views are' % len(i_test), i_test)
-    # print('%d VAL views are' % len(i_val), i_val)
+    print('%d TRAIN views are' % len(i_train), i_train)
+    print('%d TEST views are' % len(i_test), i_test)
+    print('%d VAL views are' % len(i_val), i_val)
     timer = Timer((args.N_iters - start) / args.i_testset)
     hist_loss, hist_psnr, n_new_img = 0, 0, 0
     global global_step
@@ -837,9 +839,12 @@ def train():
 
         # test: using novel poses
         if i % args.i_video == 0:
-            video_poses = get_novel_poses(args, n_pose=args.n_pose_video).to(device)
+            if args.dataset_type == 'blender':
+                video_poses = get_novel_poses(args, n_pose=args.n_pose_video).to(device)
+            else:
+                video_poses = torch.Tensor(render_poses).to(device)
             with torch.no_grad():
-                print(f'Iter {i} Rendering video...')
+                print(f'Iter {i} Rendering video... (n_pose: {len(video_poses)})')
                 t_ = time.time()
                 rgbs, disps, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, new_render_func=new_render_func)
             moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
