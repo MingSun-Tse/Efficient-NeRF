@@ -514,6 +514,7 @@ def get_dataloader(dataset_type, datadir):
         trainloader = torch.utils.data.DataLoader(dataset=trainset, 
                 batch_size=1,
                 shuffle=True, 
+                num_workers=4,
                 pin_memory=True)
     return iter(trainloader), len(trainset)
 
