@@ -143,13 +143,16 @@ parser.add_argument('--n_pose_video', type=str, default='40',
 parser.add_argument('--n_pose_kd', type=str, default='100',
         help='num of poses in rendering the video when using KD')
 parser.add_argument('--kd_with_render_pose', action="store_true",
-		help='deprecated args. Will be removed')
+	help='deprecated args. Will be removed')
 parser.add_argument('--kd_with_render_pose_mode', type=str, default='partial_render_pose', choices=['partial_render_pose', 'all_render_pose'],
         help='all_render_pose: all the training poses are generated novel poses, not from training images')
 parser.add_argument('--video_poses_perturb', action="store_true")
 parser.add_argument('--kd_poses_update', type=str, default='once')
 parser.add_argument('--datadir_kd', type=str, default='')
 parser.add_argument('--create_data_chunk', type=int, default=100)
+parser.add_argument('--i_update_data', type=int, default=500,
+        help='interval of updating training data (changing pseudo data)')
+parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0.9')
 args = parser.parse_args()
 
 def check_n_pose(n_pose):

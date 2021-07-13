@@ -508,15 +508,33 @@ def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     print(f'Teacher rendering done ({len(poses)} views). Time: {(time.time() - t_):.2f}s')
     return teacher_target
 
-def get_dataloader(dataset_type, datadir):
+def get_dataloader(dataset_type, datadir, pseudo_ratio=0.5):
     if dataset_type == 'blender':
-        trainset = BlenderDataset(datadir)
+        trainset = BlenderDataset(datadir, pseudo_ratio)
         trainloader = torch.utils.data.DataLoader(dataset=trainset, 
                 batch_size=1,
                 shuffle=True, 
                 num_workers=4,
                 pin_memory=True)
     return iter(trainloader), len(trainset)
+
+def get_pseudo_ratio(schedule, current_step):
+    '''example of schedule: 1:0.2,500000:0.9'''
+    steps, prs = [], []
+    for item in schedule.split(','):
+        step, pr = item.split(':')
+        step, pr = int(step), float(pr)
+        steps += [step]
+        prs += [pr]
+    
+    # linear scheduling
+    if current_step < steps[0]:
+        pr = prs[0]
+    elif current_step > steps[1]:
+        pr = prs[1]
+    else:
+        pr = (prs[1] - prs[0]) / (steps[1] - steps[0]) * (current_step - steps[0]) + prs[0]
+    return pr
 
 def train():
     # Load data
@@ -696,23 +714,28 @@ def train():
     if use_batching:
         rays_rgb = torch.Tensor(rays_rgb).to(device)
 
+    # data sketch
+    print(f'{len(i_train)} original train views are [{" ".join([str(x) for x in i_train])}]')
+    print(f'{len(i_test)} test views are [{" ".join([str(x) for x in i_train])}]')
+    print(f'{len(i_val)} test views are [{" ".join([str(x) for x in i_val])}]')
+
     # @mst: use our own lr scheduler
     if args.lr:
         lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
                     
-    # use dataloader for training
+    # @mst: use dataloader for training
     if args.datadir_kd:
-        trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
+        pr = get_pseudo_ratio(args.pseudo_ratio_schedule, current_step=start+1)
+        trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
+        n_seen_img = 0
+        print(f'Loaded data. Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f}')
     
     # training
-    print(f'{len(i_train)} original train views are [{" ".join([str(x) for x in i_train])}]')
-    print(f'{len(i_test)} test views are [{" ".join([str(x) for x in i_train])}]')
-    print(f'{len(i_val)} test views are [{" ".join([str(x) for x in i_val])}]')
     timer = Timer((args.N_iters - start) // args.i_testset)
-    hist_loss, hist_psnr, n_new_img, n_seen_img = 0, 0, 0, 0
+    hist_loss, hist_psnr, n_new_img = 0, 0, 0
     global global_step
     print('Begin training')
-    for i in trange(start + 1, args.N_iters + 1):
+    for i in trange(start+1, args.N_iters+1):
         t0 = time.time()
         global_step = i
         loss_line = LossLine()
@@ -749,26 +772,26 @@ def train():
                 rays_rgb = rays_rgb[rand_idx]
                 i_batch = 0
         else:
+            # Reload data if necessary
+            if args.datadir_kd:
+                if n_seen_img == n_total_img or i % args.i_update_data == 0: # update trainloader, possibly load more data
+                    t_ = time.time()
+                    pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
+                    trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
+                    n_seen_img = 0 # reset
+                    print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f}')
+
             # Random from one image
             target, pose, img_i = [x[0] for x in trainloader.next()] # batch size = 1
             target, pose = target.to(device), pose.to(device)
             pose = pose[:3, :4]
-            n_seen_img += 1
-            if n_seen_img == n_total_img: # update trainloader, possibly load more data
-                trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
-                n_seen_img = 0
-
-            # img_i = np.random.permutation(len(train_images))[0]
-            # target = train_images[img_i]
-            # pose = train_poses[img_i, :3, :4] # matrix 3x4
-
             if img_i >= n_original_img:
                 n_new_img += 1
             loss_line.update('new_img_ratio', n_new_img/(i-start), '.4f')
+            n_seen_img += 1
             
             if N_rand is not None:
                 rays_o, rays_d = get_rays(H, W, focal, pose)  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
-
                 if i < args.precrop_iters:
                     dH = int(H//2 * args.precrop_frac)
                     dW = int(W//2 * args.precrop_frac)

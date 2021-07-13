@@ -218,10 +218,15 @@ def is_img(x):
     return ext.lower() in ['.png', '.jpeg', '.jpg', '.bmp', '.npy']
 
 class BlenderDataset(Dataset):
-    def __init__(self, datadir, split='train'):
+    def __init__(self, datadir, pseudo_ratio=0.5, n_original=100, split='train'):
         self.datadir = datadir
         with open(os.path.join(datadir, 'transforms_{}.json'.format(split)), 'r') as fp:
-            self.frames = json.load(fp)['frames']
+            frames = json.load(fp)['frames']
+            n_pseudo = int(n_original / (1 - pseudo_ratio) - n_original)
+            pseudo_indices = np.random.permutation(len(frames) - n_original)[:n_pseudo] + n_original
+            self.frames = frames[:n_original]
+            for ix in pseudo_indices:
+                self.frames.append(frames[ix]) 
             
     def __getitem__(self, index):
         frame = self.frames[index]
