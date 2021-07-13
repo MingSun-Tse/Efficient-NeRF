@@ -134,7 +134,29 @@ def setup_blender_datadir(datadir_old, datadir_new):
         # print(f'../../{dirname_old}/train/{img} -> f{img}')
         os.symlink(f'../../{dirname_old}/train/{img}', f'{img}')
     os.chdir(cwd) # change back working directory
+
+def setup_blender_datadir_v2(datadir_old, datadir_new):
+    '''Set up datadir and save data as .npy.
+    '''
+    import shutil
+    if os.path.exists(datadir_new):
+        if os.path.isfile(datadir_new): 
+            os.remove(datadir_new)
+        else:
+            shutil.rmtree(datadir_new)
+    os.makedirs(datadir_new)
     
+    # copy json file
+    shutil.copy(f'{datadir_old}/transforms_train.json', datadir_new)
+    
+    # save .png images to .npy
+    imgs = [x for x in os.listdir(f'{datadir_old}/train') if x.endswith('.png')]
+    os.makedirs(f'{datadir_new}/train')
+    for img in imgs:
+        rgb = imageio.imread(f'{datadir_old}/train/{img}')
+        rgb = np.array(rgb)
+        np.save(f"{datadir_new}/train/{img.replace('.png', '.npy')}", rgb)
+
 def save_blender_data(datadir, poses, images, split='train'):
     '''Save pseudo data created by a trained nerf.'''
     import json, imageio, os
@@ -156,8 +178,9 @@ def save_blender_data(datadir, poses, images, split='train'):
         frames += [new_frame]
 
         # save image
-        img_path = '%s/%s.png' % (folder, img_path)
-        imageio.imwrite(img_path, to8b(img.data.cpu().numpy()))
+        img_path = '%s/%s.npy' % (folder, img_path)
+        # imageio.imwrite(img_path, to8b(img.data.cpu().numpy()))
+        np.save(img_path, img.data.cpu().numpy())
 
     with open(json_file, 'w') as f:
         data['frames'] = frames
@@ -183,3 +206,25 @@ def load_blender_data_v2(datadir, half_res=False, white_bkgd=True, split='train'
         imgs.append(img)
         poses.append(pose)
     return np.array(imgs), np.array(poses)
+
+# Use dataloader to load data
+def is_img(x):
+    _, ext = os.path.splitext(x)
+    return ext.lower() in ['.png', '.jpeg', '.jpg', '.bmp', '.npy']
+
+from torch.utils.data import Dataset
+class BlenderDataset(Dataset):
+    def __init__(self, datadir, split='train'):
+        self.datadir = datadir
+        with open(os.path.join(datadir, 'transforms_{}.json'.format(split)), 'r') as fp:
+            self.frames = json.load(fp)['frames']
+            
+    def __getitem__(self, index):
+        frame = self.frames[index]
+        pose = torch.Tensor(frame['transform_matrix'])
+        fname = os.path.join(self.datadir, frame['file_path'] + '.npy') # 'file_path' includes file extension
+        img = torch.Tensor(np.load(fname))
+        return img, pose, index
+
+    def __len__(self):
+        return len(self.frames)

@@ -17,7 +17,7 @@ from run_nerf_helpers_v2 import NeRF_v2, img2mse, mse2psnr, to8b, get_rays, get_
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data, setup_blender_datadir, save_blender_data
+from load_blender import load_blender_data, setup_blender_datadir_v2 as setup_blender_datadir, save_blender_data
 from collections import OrderedDict
 import copy
 
@@ -624,10 +624,10 @@ def train():
     print(f'Get new poses, done! Total num of new poses: {n_new_pose}')
 
     # render pseduo data
-    batch_size = 100
+    chunk = args.create_data_chunk
     n_img = len(train_images)
-    for i in range(0, n_new_pose, batch_size):
-        poses = kd_poses[i: i+batch_size]
+    for i in range(0, n_new_pose, chunk):
+        poses = kd_poses[i: i+chunk]
         n_img += len(poses)
         teacher_target = get_teacher_target(poses, H, W, focal, render_kwargs_train, args)
         if args.dataset_type == 'blender':
