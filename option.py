@@ -153,6 +153,7 @@ parser.add_argument('--create_data_chunk', type=int, default=100)
 parser.add_argument('--i_update_data', type=int, default=500,
         help='interval of updating training data (changing pseudo data)')
 parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0.9')
+parser.add_argument('--init', type=str, default='default', choices=['default', 'orth'])
 args = parser.parse_args()
 
 def check_n_pose(n_pose):

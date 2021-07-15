@@ -227,6 +227,10 @@ def create_nerf(args, near, far):
                                                                     netchunk=args.netchunk)
     elif args.model_name in ['nerf_v2']:
         model = NeRF_v2(args, near, far, device=device, print=netprint).to(device)
+        if args.init == 'orth':
+            act_func = 'relu' # needs changes if the model does not use ReLU as activation func
+            model.apply(lambda m: _weights_init_orthogonal(m, act=act_func))
+            print(f'Use orth init. Activation func: {act_func}')
         grad_vars = list(model.parameters())
     
     # in KD, there is a pretrained teacher
@@ -479,7 +483,7 @@ def render_rays(ray_batch,
 
 # set up logging directories -------
 from logger import Logger
-from utils import Timer, check_path, LossLine, PresetLRScheduler, strdict_to_dict
+from utils import Timer, check_path, LossLine, PresetLRScheduler, strdict_to_dict, _weights_init_orthogonal
 from option import args
 
 logger = Logger(args)
