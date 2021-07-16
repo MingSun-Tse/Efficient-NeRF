@@ -1,5 +1,7 @@
 import numpy as np
 import os, imageio
+from torch.utils.data import Dataset
+to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
 
 
 ########## Slightly modified version of LLFF data loading code 
@@ -61,9 +63,9 @@ def _minify(basedir, factors=[], resolutions=[]):
         
 def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
     
-    poses_arr = np.load(os.path.join(basedir, 'poses_bounds.npy'))
-    poses = poses_arr[:, :-2].reshape([-1, 3, 5]).transpose([1,2,0])
-    bds = poses_arr[:, -2:].transpose([1,0])
+    poses_arr = np.load(os.path.join(basedir, 'poses_bounds.npy')) # shape [20, 17]
+    poses = poses_arr[:, :-2].reshape([-1, 3, 5]).transpose([1,2,0]) # shape [3, 5, 20]
+    bds = poses_arr[:, -2:].transpose([1,0]) # roughly, bounds = 1.7~7.6
     
     img0 = [os.path.join(basedir, 'images', f) for f in sorted(os.listdir(os.path.join(basedir, 'images'))) \
             if f.endswith('JPG') or f.endswith('jpg') or f.endswith('png')][0]
@@ -114,7 +116,7 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
     imgs = imgs = [imread(f)[...,:3]/255. for f in imgfiles]
     imgs = np.stack(imgs, -1)  
     
-    print('Loaded image data', imgs.shape, poses[:,-1,0])
+    print('Loaded image data', imgs.shape, poses[:,-1,0]) # imgs.shape (378, 504, 3, 20)
     return poses, bds, imgs
 
     
@@ -304,7 +306,7 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
 
     c2w = poses_avg(poses)
     print('Data:')
-    print(poses.shape, images.shape, bds.shape)
+    print(poses.shape, images.shape, bds.shape) # (20, 3, 5) (20, 378, 504, 3) (20, 2)
     
     dists = np.sum(np.square(c2w[:3,3] - poses[:,:3,3]), -1)
     i_test = np.argmin(dists)
@@ -315,10 +317,30 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
 
     return images, poses, bds, render_poses, i_test
 
-
-
 def save_llff_data():
     pass
 
 def load_llff_data_v2():
     pass
+
+class LLFFDataset(Dataset):
+    def __init__(self, datadir, pseudo_ratio=0.5, n_original=100, split='train'):
+        self.datadir = datadir
+        with open(os.path.join(datadir, 'transforms_{}.json'.format(split)), 'r') as fp:
+            frames = json.load(fp)['frames']
+            n_pseudo = int(n_original / (1 - pseudo_ratio) - n_original)
+            pseudo_indices = np.random.permutation(len(frames) - n_original)[:n_pseudo] + n_original
+            self.frames = frames[:n_original]
+            for ix in pseudo_indices:
+                self.frames.append(frames[ix]) 
+            
+    def __getitem__(self, index):
+        index = index % (len(self.frames))
+        frame = self.frames[index]
+        pose = torch.Tensor(frame['transform_matrix'])
+        fname = os.path.join(self.datadir, frame['file_path'] + '.npy') # 'file_path' includes file extension
+        img = torch.Tensor(np.load(fname))
+        return img, pose, index
+
+    def __len__(self):
+        return len(self.frames)

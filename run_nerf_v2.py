@@ -274,7 +274,6 @@ def create_nerf(args, near, far):
             _load_weights(model_fine, args.pretrained_ckpt, 'network_fine_state_dict')
         print('Load pretrained ckpt successfully: "%s"' % ckpt_path)
         
-        # resume optimizer and iteration number if necessary
         if args.resume:
             start = ckpt['global_step']
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
@@ -327,7 +326,7 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     raw2alpha = lambda raw, dists, act_fn=F.relu: 1.-torch.exp(-act_fn(raw)*dists) # @mst: opacity
 
     dists = z_vals[...,1:] - z_vals[...,:-1] # dists for 'distances'
-    dists = torch.cat([dists, torch.Tensor([1e10]).expand(dists[...,:1].shape)], -1)  # [N_rays, N_samples]
+    dists = torch.cat([dists, torch.Tensor([1e10]).to(device).expand(dists[...,:1].shape)], -1)  # [N_rays, N_samples]
     # @mst: 1e10 for infinite distance
 
     dists = dists * torch.norm(rays_d[...,None,:], dim=-1) # @mst: direction vector needs normalization. why this * ?
@@ -335,13 +334,13 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     rgb = torch.sigmoid(raw[...,:3])  # [N_rays, N_samples, 3], RGB for each sampled point 
     noise = 0.
     if raw_noise_std > 0.:
-        noise = torch.randn(raw[...,3].shape) * raw_noise_std
+        noise = torch.randn(raw[...,3].shape).to(device) * raw_noise_std
 
         # Overwrite randomly sampled data if pytest
         if pytest:
             np.random.seed(0)
             noise = np.random.rand(*list(raw[...,3].shape)) * raw_noise_std
-            noise = torch.Tensor(noise)
+            noise = torch.Tensor(noise).to(device)
 
     alpha = raw2alpha(raw[...,3] + noise, dists)  # [N_rays, N_samples]
 
@@ -352,11 +351,11 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
             netprint('%4d: ' % i_ray + ' '.join(logtmp))
 
     # weights = alpha * tf.math.cumprod(1.-alpha + 1e-10, -1, exclusive=True)
-    weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)), 1.-alpha + 1e-10], -1), -1)[:, :-1] # @mst: [N_rays, N_samples]
+    weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)).to(device), 1.-alpha + 1e-10], -1), -1)[:, :-1] # @mst: [N_rays, N_samples]
     rgb_map = torch.sum(weights[...,None] * rgb, -2)  # [N_rays, 3]
 
     depth_map = torch.sum(weights * z_vals, -1)
-    disp_map = 1./torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))
+    disp_map = 1./torch.max(1e-10 * torch.ones_like(depth_map).to(device), depth_map / torch.sum(weights, -1))
     acc_map = torch.sum(weights, -1)
 
     if white_bkgd:
@@ -380,7 +379,6 @@ def render_rays(ray_batch,
                 pytest=False):
     """Volumetric rendering.
     Args:
-      ray_batch: array of shape [batch_size, ...]. All information necessary
         for sampling along a ray, including: ray origin, ray direction, min
         dist, max dist, and unit-magnitude viewing direction.
       network_fn: function. Model for predicting RGB and density at each point
@@ -415,7 +413,7 @@ def render_rays(ray_batch,
     bounds = torch.reshape(ray_batch[...,6:8], [-1,1,2])
     near, far = bounds[...,0], bounds[...,1] # @mst: near=2, far=6, in batch
 
-    t_vals = torch.linspace(0., 1., steps=N_samples)
+    t_vals = torch.linspace(0., 1., steps=N_samples).to(device)
     if not lindisp:
         z_vals = near * (1.-t_vals) + far * (t_vals)
     else:
@@ -430,13 +428,13 @@ def render_rays(ray_batch,
         upper = torch.cat([mids, z_vals[...,-1:]], -1)
         lower = torch.cat([z_vals[...,:1], mids], -1)
         # stratified samples in those intervals
-        t_rand = torch.rand(z_vals.shape) # uniform dist [0, 1)
+        t_rand = torch.rand(z_vals.shape).to(device) # uniform dist [0, 1)
 
         # Pytest, overwrite u with numpy's fixed random numbers
         if pytest:
             np.random.seed(0)
             t_rand = np.random.rand(*list(z_vals.shape))
-            t_rand = torch.Tensor(t_rand)
+            t_rand = torch.Tensor(t_rand).to(device)
 
         z_vals = lower + (upper - lower) * t_rand
     
@@ -454,8 +452,8 @@ def render_rays(ray_batch,
         rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
 
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
-        z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
-        z_samples = z_samples.detach()
+        z_samples = sample_pdf(z_vals_mid.cpu(), weights[...,1:-1].cpu(), N_importance, det=(perturb==0.), pytest=pytest)
+        z_samples = z_samples.detach().to(device)
 
         z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1) # @mst: sort to merge the fine samples with the coarse samples
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples + N_importance, 3]
@@ -494,6 +492,7 @@ ExpID = logger.ExpID
 # ---------------------------------
 
 def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
+    poses = to_tensor(poses)
     render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
     render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
     render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
@@ -503,7 +502,7 @@ def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     t_ = time.time()
     for ix, pose in enumerate(poses):
         print(f'[{ix}/{len(poses)}] Using teacher to render more images...')
-        rays_o, rays_d = get_rays(H, W, focal, torch.Tensor(pose))
+        rays_o, rays_d = get_rays(H, W, focal, pose)
         batch_rays = torch.stack([rays_o, rays_d], 0)
         rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
                                         verbose=False, retraw=False,
@@ -741,7 +740,7 @@ def train():
     # data sketch
     print(f'{len(i_train)} original train views are [{" ".join([str(x) for x in i_train])}]')
     print(f'{len(i_test)} test views are [{" ".join([str(x) for x in i_train])}]')
-    print(f'{len(i_val)} test views are [{" ".join([str(x) for x in i_val])}]')
+    print(f'{len(i_val)} val views are [{" ".join([str(x) for x in i_val])}]')
 
     # @mst: use our own lr scheduler
     if args.lr:
@@ -749,14 +748,20 @@ def train():
                     
     # @mst: use dataloader for training
     if args.datadir_kd:
-        pr = get_pseudo_ratio(args.pseudo_ratio_schedule, current_step=start+1)
-        trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
+        if args.dataset_type == 'blender':
+            pr = get_pseudo_ratio(args.pseudo_ratio_schedule, current_step=start+1)
+            trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
+        else: # LLFF dataset
+            kd_poses = copy.deepcopy(render_poses)
+            kd_targets = get_teacher_target(kd_poses, H, W, focal, render_kwargs_train, args)
+            n_total_img = len(kd_poses) + len(train_images)
+            pr = len(kd_poses) / n_total_img
         n_seen_img = 0
-        print(f'Loaded data. Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f}')
-    
+        print(f'Loaded data. Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f} ')
+
     # training
     timer = Timer((args.N_iters - start) // args.i_testset)
-    hist_loss, hist_psnr, n_new_img = 0, 0, 0
+    hist_loss, hist_psnr, n_pseudo_img = 0, 0, 0
     global global_step
     print('Begin training')
     for i in trange(start+1, args.N_iters+1):
@@ -796,24 +801,40 @@ def train():
                 rays_rgb = rays_rgb[rand_idx]
                 i_batch = 0
         else:
-            # Reload data if necessary
+            # Random from one image
+            img_i = np.random.choice(i_train)
+            target = to_tensor(images[img_i])
+            pose = to_tensor(poses[img_i, :3,:4])
+            
+            # KD
             if args.datadir_kd:
                 if i % args.i_update_data == 0: # update trainloader, possibly load more data
-                    t_ = time.time()
-                    pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
-                    trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
-                    n_seen_img = 0 # reset
-                    print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f}')
+                    if args.dataset_type == 'blender':
+                        t_ = time.time()
+                        pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
+                        trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
+                        n_seen_img = 0 # reset
+                        print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f}')
 
-            # Random from one image
-            target, pose, img_i = [x[0] for x in trainloader.next()] # batch size = 1
-            target, pose = target.to(device), pose.to(device)
-            pose = pose[:3, :4]
-            if img_i >= n_original_img:
-                n_new_img += 1
-            loss_line.update('new_img_ratio', n_new_img/(i-start), '.4f')
-            n_seen_img += 1
+                # get pose and target
+                if args.dataset_type == 'blender':
+                    target, pose, img_i = [x[0] for x in trainloader.next()] # batch size = 1
+                    target, pose = target.to(device), pose.to(device)
+                    pose = pose[:3, :4]
+                    if img_i >= n_original_img:
+                        n_pseudo_img += 1
+                else: # LLFF dataset
+                    use_pseudo_img = torch.rand(1) < len(kd_poses) / (len(train_poses) + len(kd_poses))
+                    if use_pseudo_img:
+                        img_i = np.random.permutation(len(kd_poses))[0]
+                        pose = to_tensor(kd_poses[img_i, :3, :4])
+                        target = to_tensor(kd_targets[img_i])
+                        n_pseudo_img += 1
             
+            n_seen_img += 1
+            loss_line.update('pseudo_img_ratio', n_pseudo_img/ n_seen_img, '.4f')
+
+
             if N_rand is not None:
                 rays_o, rays_d = get_rays(H, W, focal, pose)  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
                 if i < args.precrop_iters:

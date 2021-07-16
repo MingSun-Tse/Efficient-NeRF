@@ -8,11 +8,12 @@ from load_blender import pose_spherical
 
 # TODO: remove this dependency
 from torchsearchsorted import searchsorted
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Misc
 img2mse = lambda x, y : torch.mean((x - y) ** 2)
-mse2psnr = lambda x : -10. * torch.log(x).cuda() / torch.log(torch.Tensor([10.])).cuda()
-to_tensor = lambda x: x.cuda() if isinstance(x, torch.Tensor) else torch.Tensor(x).cuda()
+mse2psnr = lambda x : -10. * torch.log(x).to(device) / torch.log(torch.Tensor([10.])).to(device)
+to_tensor = lambda x: x.to(device) if isinstance(x, torch.Tensor) else torch.Tensor(x).to(device)
 to_nparray = lambda x: x if isinstance(x, np.array) else x.data.cpu().numpy()
 to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
 
@@ -370,8 +371,8 @@ class NeRF_v2(nn.Module):
 # Ray helpers
 def get_rays(H, W, focal, c2w):
     i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H)) # pytorch's meshgrid has indexing='ij'
-    i = i.t().cuda()
-    j = j.t().cuda()
+    i = i.t().to(device)
+    j = j.t().to(device)
     dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1)
     # Rotate ray directions from camera frame to the world frame
     rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
