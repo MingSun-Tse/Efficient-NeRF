@@ -501,15 +501,32 @@ def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     teacher_target = []
     t_ = time.time()
     for ix, pose in enumerate(poses):
-        print(f'[{ix}/{len(poses)}] Using teacher to render more images...')
+        print(f'[{ix}/{len(poses)}] Using teacher to render more images... elapsed time: {(time.time() - t_):.2f}s')
         rays_o, rays_d = get_rays(H, W, focal, pose)
         batch_rays = torch.stack([rays_o, rays_d], 0)
         rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
                                         verbose=False, retraw=False,
                                         **render_kwargs_)
         teacher_target.append(rgb)
+        # # check pseudo images
+        # filename = f'kd_fern_{ix}.png'
+        # imageio.imwrite(filename, to8b(rgb.data.cpu().numpy()))
     print(f'Teacher rendering done ({len(poses)} views). Time: {(time.time() - t_):.2f}s')
     return teacher_target
+
+def get_teacher_target_v2(poses, H, W, focal, render_kwargs_train, args):
+    hwf = [H, W, focal]
+    render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
+    render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
+    render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
+    render_kwargs_.pop('teacher_fn')
+    render_kwargs_.pop('teacher_fine')
+    rgbs, *_ = render_path(poses, hwf, args.chunk, render_kwargs_, render_factor=args.render_factor, new_render_func=False)
+    # # check pseudo images
+    # for ix, rgb in enumerate(rgbs):
+    #     filename = f'kd_fern_{ix}.png'
+    #     imageio.imwrite(filename, to8b(rgb))
+    return rgbs
 
 def InfiniteSampler(n):
     order = np.random.permutation(n)
@@ -645,6 +662,11 @@ def train():
     # exit()
     # # -------------
 
+    # data sketch
+    print(f'{len(i_train)} original train views are [{" ".join([str(x) for x in i_train])}]')
+    print(f'{len(i_test)} test views are [{" ".join([str(x) for x in i_train])}]')
+    print(f'{len(i_val)} val views are [{" ".join([str(x) for x in i_val])}]')
+
     # Create log dir and copy the config file
     basedir = logger.exp_path # args.basedir @mst: use our experiment path
     expname = args.expname
@@ -737,11 +759,6 @@ def train():
     if use_batching:
         rays_rgb = torch.Tensor(rays_rgb).to(device)
 
-    # data sketch
-    print(f'{len(i_train)} original train views are [{" ".join([str(x) for x in i_train])}]')
-    print(f'{len(i_test)} test views are [{" ".join([str(x) for x in i_train])}]')
-    print(f'{len(i_val)} val views are [{" ".join([str(x) for x in i_val])}]')
-
     # @mst: use our own lr scheduler
     if args.lr:
         lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
@@ -753,7 +770,7 @@ def train():
             trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
         else: # LLFF dataset
             kd_poses = copy.deepcopy(render_poses)
-            kd_targets = get_teacher_target(kd_poses, H, W, focal, render_kwargs_train, args)
+            kd_targets = get_teacher_target_v2(kd_poses, H, W, focal, render_kwargs_train, args)
             n_total_img = len(kd_poses) + len(train_images)
             pr = len(kd_poses) / n_total_img
         n_seen_img = 0
