@@ -522,10 +522,12 @@ def get_teacher_target_v2(poses, H, W, focal, render_kwargs_train, args):
     render_kwargs_.pop('teacher_fn')
     render_kwargs_.pop('teacher_fine')
     rgbs, *_ = render_path(poses, hwf, args.chunk, render_kwargs_, render_factor=args.render_factor, new_render_func=False)
-    # # check pseudo images
-    # for ix, rgb in enumerate(rgbs):
-    #     filename = f'kd_fern_{ix}.png'
-    #     imageio.imwrite(filename, to8b(rgb))
+    # check pseudo images
+    savedir = f'{logger.gen_img_path}/teacher_targets_{ExpID}'
+    if not os.path.exists(savedir):
+        os.makedirs(savedir)
+    for ix, rgb in enumerate(rgbs):
+        imageio.imwrite(f'{savedir}/{ix}.png', to8b(rgb))
     return rgbs
 
 def InfiniteSampler(n):
