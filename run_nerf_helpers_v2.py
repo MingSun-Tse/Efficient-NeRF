@@ -11,11 +11,12 @@ from torchsearchsorted import searchsorted
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Misc
-img2mse = lambda x, y : torch.mean((x - y) ** 2)
-mse2psnr = lambda x : -10. * torch.log(x).to(device) / torch.log(torch.Tensor([10.])).to(device)
 to_tensor = lambda x: x.to(device) if isinstance(x, torch.Tensor) else torch.Tensor(x).to(device)
-to_nparray = lambda x: x if isinstance(x, np.array) else x.data.cpu().numpy()
-to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
+to_array = lambda x: x if isinstance(x, np.ndarray) else x.data.cpu().numpy()
+to_list = lambda x: x if isinstance(x, list) else to_array(x).tolist()
+to8b = lambda x : (255 * np.clip(to_array(x), 0, 1)).astype(np.uint8)
+img2mse = lambda x, y : torch.mean((x - y) ** 2)
+mse2psnr = lambda x : -10. * torch.log(x) / torch.log(to_tensor([10.]))
 
 # Positional encoding (section 5.1)
 class Embedder:
@@ -157,7 +158,6 @@ class NeRF_v2(nn.Module):
         D, W = args.netdepth, args.netwidth
         self.skips = [int(x) for x in args.skips.split(',')] if args.skips else []
         self.print = print
-        self.device = device
 
         # positional embedding function
         self.embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
@@ -246,7 +246,7 @@ class NeRF_v2(nn.Module):
                 self.print('t_vals: ' + ' '.join(logtmp))
             z_vals = self.near * (1 - t_vals) + self.far * t_vals # depth, [n_ray, n_sample]
         else:
-            t_vals = torch.linspace(0., 1., steps=n_sample).to(self.device)
+            t_vals = torch.linspace(0., 1., steps=n_sample).to(device)
             t_vals = t_vals[None, :].expand(n_ray, n_sample)
             z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
             if perturb > 0.:
@@ -255,7 +255,7 @@ class NeRF_v2(nn.Module):
                 upper = torch.cat([mids, z_vals[...,-1:]], -1)
                 lower = torch.cat([z_vals[...,:1], mids], -1)
                 # stratified samples in those intervals
-                t_rand = torch.rand(z_vals.shape).to(self.device) # uniform dist [0, 1)
+                t_rand = torch.rand(z_vals.shape).to(device) # uniform dist [0, 1)
                 z_vals = lower + (upper - lower) * t_rand
         
         # get sample coordinates
@@ -423,7 +423,7 @@ def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
     elif args.dataset_type == 'llff':
         pass
 
-    return novel_poses
+    return to_tensor(novel_poses)
 
 def get_novel_poses_v2(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
     '''Random sampling

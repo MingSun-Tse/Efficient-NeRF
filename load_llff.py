@@ -1,7 +1,7 @@
 import numpy as np
 import os, imageio
 from torch.utils.data import Dataset
-to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
+from run_nerf_helpers_v2 import to_tensor, to8b
 
 
 ########## Slightly modified version of LLFF data loading code 
@@ -315,7 +315,7 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     images = images.astype(np.float32)
     poses = poses.astype(np.float32)
 
-    return images, poses, bds, render_poses, i_test
+    return to_tensor(images), to_tensor(poses), to_tensor(bds), to_tensor(render_poses), i_test
 
 def save_llff_data():
     pass

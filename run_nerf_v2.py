@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 from run_nerf_helpers import NeRF, sample_pdf, ndc_rays
 from run_nerf_helpers_v2 import NeRF_v2, get_rays, get_embedder, get_novel_poses
-from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, mse2psnr, to8b, img2mse
+from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
@@ -138,8 +138,6 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
 
 
 def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0, new_render_func=False):
-    render_poses = to_tensor(render_poses)
-
     H, W, focal = hwf
     if render_factor!=0:
         # Render downsampled for speed
@@ -164,22 +162,19 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         else: # original implementation
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)
         
-        rgbs.append(rgb.cpu().numpy())
-        disps.append(disp.cpu().numpy())
+        rgbs.append(rgb)
+        disps.append(disp)
 
         if savedir is not None:
-            rgb8 = to8b(rgbs[-1])
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
-            imageio.imwrite(filename, rgb8)
+            imageio.imwrite(filename, to8b(rgbs[-1]))
 
-    rgbs = np.stack(rgbs, 0)
-    disps = np.stack(disps, 0)
+    rgbs = torch.stack(rgbs, dim=0)
+    disps = torch.stack(disps, dim=0)
     
     if gt_imgs is not None:
-        rgbs = torch.from_numpy(rgbs).to(device)
         test_loss = img2mse(rgbs, gt_imgs)
         test_psnr = mse2psnr(test_loss)
-        rgbs = rgbs.data.cpu().numpy() # change back to np array type
     else:
         test_loss, test_psnr = None, None
 
@@ -326,7 +321,7 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     raw2alpha = lambda raw, dists, act_fn=F.relu: 1.-torch.exp(-act_fn(raw)*dists) # @mst: opacity
 
     dists = z_vals[...,1:] - z_vals[...,:-1] # dists for 'distances'
-    dists = torch.cat([dists, torch.Tensor([1e10]).to(device).expand(dists[...,:1].shape)], -1)  # [N_rays, N_samples]
+    dists = torch.cat([dists, to_tensor([1e10]).expand(dists[...,:1].shape)], -1)  # [N_rays, N_samples]
     # @mst: 1e10 for infinite distance
 
     dists = dists * torch.norm(rays_d[...,None,:], dim=-1) # @mst: direction vector needs normalization. why this * ?
@@ -340,7 +335,7 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
         if pytest:
             np.random.seed(0)
             noise = np.random.rand(*list(raw[...,3].shape)) * raw_noise_std
-            noise = torch.Tensor(noise).to(device)
+            noise = to_tensor(noise)
 
     alpha = raw2alpha(raw[...,3] + noise, dists)  # [N_rays, N_samples]
 
@@ -434,7 +429,7 @@ def render_rays(ray_batch,
         if pytest:
             np.random.seed(0)
             t_rand = np.random.rand(*list(z_vals.shape))
-            t_rand = torch.Tensor(t_rand).to(device)
+            t_rand = to_tensor(t_rand)
 
         z_vals = lower + (upper - lower) * t_rand
     
@@ -492,7 +487,6 @@ ExpID = logger.ExpID
 # ---------------------------------
 
 def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
-    poses = to_tensor(poses)
     render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
     render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
     render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
@@ -515,6 +509,10 @@ def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     return teacher_target
 
 def get_teacher_target_v2(poses, H, W, focal, render_kwargs_train, args):
+    save_path = 'teacher_targets.pt'
+    if args.debug:
+        factor = args.render_factor if args.render_factor != 0 else 1
+        return torch.randn([poses.shape[0], H//factor, W//factor, 3]).to(device)
     hwf = [H, W, focal]
     render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
     render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
@@ -528,6 +526,7 @@ def get_teacher_target_v2(poses, H, W, focal, render_kwargs_train, args):
         os.makedirs(savedir)
     for ix, rgb in enumerate(rgbs):
         imageio.imwrite(f'{savedir}/{ix}.png', to8b(rgb))
+    torch.save(save_path, rgbs.data.cpu())
     return rgbs
 
 def InfiniteSampler(n):
@@ -587,8 +586,6 @@ def train():
         hwf = poses[0,:3,-1]
         poses = poses[:,:3,:4]
         print('Loaded llff', images.shape, render_poses.shape, hwf, args.datadir)
-        if not isinstance(i_test, list):
-            i_test = [i_test]
 
         if args.llffhold > 0:
             print('Auto LLFF holdout,', args.llffhold)
@@ -643,8 +640,9 @@ def train():
     H, W = int(H), int(W)
     hwf = [H, W, focal]
 
-    test_poses = torch.Tensor(poses[i_test]).to(device)
-    test_images = torch.Tensor(images[i_test]).to(device)
+    train_images, train_poses = images[i_train], poses[i_train]
+    test_poses, test_images = poses[i_test], images[i_test]
+    n_original_img = len(train_images)
     # # ------------- check poses
     # netprint('=====> Test poses:')
     # for p in test_poses:
@@ -666,8 +664,9 @@ def train():
 
     # data sketch
     print(f'{len(i_train)} original train views are [{" ".join([str(x) for x in i_train])}]')
-    print(f'{len(i_test)} test views are [{" ".join([str(x) for x in i_train])}]')
+    print(f'{len(i_test)} test views are [{" ".join([str(x) for x in i_test])}]')
     print(f'{len(i_val)} val views are [{" ".join([str(x) for x in i_val])}]')
+    print(f'train_images shape {train_images.shape} train_poses shape {train_images.shape}')
 
     # Create log dir and copy the config file
     basedir = logger.exp_path # args.basedir @mst: use our experiment path
@@ -725,9 +724,9 @@ def train():
                 print(f'[TEST] Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
             else:
                 if args.dataset_type == 'blender':
-                    video_poses = get_novel_poses(args, n_pose=args.n_pose_video).to(device)
+                    video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
                 else:
-                    video_poses = torch.Tensor(render_poses).to(device)
+                    video_poses = render_poses
                 print(f'Rendering video... (n_pose: {len(video_poses)})')
                 rgbs, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=None, savedir=testsavedir, render_factor=args.render_factor, new_render_func=new_render_func)
         video_path = os.path.join(testsavedir, f'video_pose{args.n_pose_video}_{exp_id}_iter{iter}.mp4')
@@ -754,10 +753,6 @@ def train():
         i_batch = 0
 
     # Move training data to GPU
-    images = torch.Tensor(images).to(device)
-    poses = torch.Tensor(poses).to(device)
-    train_images, train_poses = images[i_train], poses[i_train]
-    n_original_img = len(train_images)
     if use_batching:
         rays_rgb = torch.Tensor(rays_rgb).to(device)
 
@@ -772,6 +767,7 @@ def train():
             trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
         else: # LLFF dataset
             kd_poses = copy.deepcopy(render_poses)
+            print(f'Using teacher to render {len(kd_poses)} images for KD...')
             kd_targets = get_teacher_target_v2(kd_poses, H, W, focal, render_kwargs_train, args)
             n_total_img = len(kd_poses) + len(train_images)
             pr = len(kd_poses) / n_total_img
@@ -822,8 +818,8 @@ def train():
         else:
             # Random from one image
             img_i = np.random.choice(i_train)
-            target = to_tensor(images[img_i])
-            pose = to_tensor(poses[img_i, :3,:4])
+            target = images[img_i]
+            pose = poses[img_i, :3,:4]
             
             # KD
             if args.datadir_kd:
@@ -846,8 +842,8 @@ def train():
                     use_pseudo_img = torch.rand(1) < len(kd_poses) / (len(train_poses) + len(kd_poses))
                     if use_pseudo_img:
                         img_i = np.random.permutation(len(kd_poses))[0]
-                        pose = to_tensor(kd_poses[img_i, :3, :4])
-                        target = to_tensor(kd_targets[img_i])
+                        pose = kd_poses[img_i, :3, :4]
+                        target = kd_targets[img_i]
                         n_pseudo_img += 1
             
             n_seen_img += 1
@@ -907,6 +903,14 @@ def train():
                     else:
                         rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
                 
+                # check rgb
+                # if i % 10 == 0:
+                #     savedir = f'{logger.gen_img_path}/rgb_during_train_{ExpID}'
+                #     if not os.path.exists(savedir):
+                #         os.makedirs(savedir)
+                #     for ix, im in enumerate(rgb):
+                #         imageio.imwrite(f'{savedir}/iter{i}_{ix}.png', to8b(im.data.cpu().numpy()))
+                
                 # print(rays_o.shape, rays_d.shape, rgb.shape, target_s.shape, img_i) # check shape
                 img_loss = img2mse(rgb, target_s)
                 loss += img_loss
@@ -944,7 +948,7 @@ def train():
                 print(f'Iter {i} Testing...')
                 t_ = time.time()
                 *_, test_loss, test_psnr = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, 
-                    savedir=testsavedir, new_render_func=new_render_func)
+                    savedir=testsavedir, render_factor=args.render_factor, new_render_func=new_render_func)
                 t_test = time.time() - t_
             accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} Train_HistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s')
             print(f'Saved rendered test images: "{testsavedir}"')
@@ -953,17 +957,21 @@ def train():
         # test: using novel poses
         if i % args.i_video == 0:
             if args.dataset_type == 'blender':
-                video_poses = get_novel_poses(args, n_pose=args.n_pose_video).to(device)
+                video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
             else:
-                video_poses = torch.Tensor(render_poses).to(device)
+                video_poses = render_poses
             with torch.no_grad():
                 print(f'Iter {i} Rendering video... (n_pose: {len(video_poses)})')
                 t_ = time.time()
-                rgbs, disps, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, new_render_func=new_render_func)
+                gt_imgs = kd_targets if args.datadir_kd and (video_poses-kd_poses).abs().sum() == 0 else None
+                rgbs, disps, *_, video_loss, video_psnr = render_path(kd_poses, hwf, args.chunk, render_kwargs_test, 
+                        gt_imgs=gt_imgs,render_factor=args.render_factor, new_render_func=new_render_func)
             video_path = f'{logger.gen_img_path}/video_pose{args.n_pose_video}_{ExpID}_iter{i}.mp4'
             imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
             # imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
             print(f'[VIDEO] Rendering done. Time {(time.time() - t_):.2f}s. Save video: "{video_path}"')
+            if video_psnr is not None:
+                print(f'[VIDEO] video_loss {video_loss.item():.4f} video_psnr {video_psnr.item():.4f}')
 
         # save checkpoint
         if i % args.i_weights == 0:
