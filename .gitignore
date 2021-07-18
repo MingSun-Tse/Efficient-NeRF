@@ -11,3 +11,5 @@ train_params/
 data/
 tiny_nerf_data.npz
 *.txt
+*.npy
+scripts
