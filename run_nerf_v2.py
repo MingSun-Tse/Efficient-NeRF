@@ -150,8 +150,10 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         if new_render_func: # our new rendering func
             model = render_kwargs['network_fn']
             perturb = render_kwargs['perturb']
-            rays_o, rays_d = get_rays(H, W, focal, c2w)
+            rays_o, rays_d = get_rays(H, W, focal, c2w[:3,:4]) # rays_o shape: # [H, W, 3]
             rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3)
+            
+            # batchify
             rgb, disp = [], []
             for ix in range(0, rays_o.shape[0], chunk):
                 rgb_, disp_, *_ = model(rays_o[ix: ix+chunk], rays_d[ix: ix+chunk], perturb=perturb)
@@ -159,6 +161,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 disp += [disp_]
             rgb, disp = torch.cat(rgb, dim=0), torch.cat(disp, dim=0)
             rgb, disp = rgb.view(H, W, -1), disp.view(H, W, -1)
+        
         else: # original implementation
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)
         
@@ -509,25 +512,30 @@ def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     return teacher_target
 
 def get_teacher_target_v2(poses, H, W, focal, render_kwargs_train, args):
-    save_path = 'teacher_targets.pt'
-    if args.debug:
-        factor = args.render_factor if args.render_factor != 0 else 1
-        return torch.randn([poses.shape[0], H//factor, W//factor, 3]).to(device)
-    hwf = [H, W, focal]
-    render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
-    render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
-    render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
-    render_kwargs_.pop('teacher_fn')
-    render_kwargs_.pop('teacher_fine')
-    rgbs, *_ = render_path(poses, hwf, args.chunk, render_kwargs_, render_factor=args.render_factor, new_render_func=False)
-    # check pseudo images
-    savedir = f'{logger.gen_img_path}/teacher_targets_{ExpID}'
-    if not os.path.exists(savedir):
-        os.makedirs(savedir)
-    for ix, rgb in enumerate(rgbs):
-        imageio.imwrite(f'{savedir}/{ix}.png', to8b(rgb))
-    torch.save(save_path, rgbs.data.cpu())
-    return rgbs
+    if os.path.exists(args.teacher_targets_save_path):
+        rgbs = np.load(args.teacher_targets_save_path)
+        rgbs = to_tensor(rgbs)
+        print(f'Loaded saved teacher targets: "{args.teacher_targets_save_path}"')
+        return rgbs
+    else:
+        if args.debug:
+            factor = args.render_factor if args.render_factor != 0 else 1
+            return torch.randn([poses.shape[0], H//factor, W//factor, 3]).to(device)
+        hwf = [H, W, focal]
+        render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
+        render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
+        render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
+        render_kwargs_.pop('teacher_fn')
+        render_kwargs_.pop('teacher_fine')
+        rgbs, *_ = render_path(poses, hwf, args.chunk, render_kwargs_, render_factor=args.render_factor, new_render_func=False)
+        # check pseudo images
+        savedir = f'{logger.gen_img_path}/teacher_targets_{ExpID}'
+        if not os.path.exists(savedir):
+            os.makedirs(savedir)
+        for ix, rgb in enumerate(rgbs):
+            imageio.imwrite(f'{savedir}/{ix}.png', to8b(rgb))
+        np.save(args.teacher_targets_save_path, to_array(rgbs))
+        return rgbs
 
 def InfiniteSampler(n):
     order = np.random.permutation(n)

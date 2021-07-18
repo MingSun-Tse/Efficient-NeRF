@@ -154,6 +154,7 @@ parser.add_argument('--i_update_data', type=int, default=500,
         help='interval of updating training data (changing pseudo data)')
 parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0.9')
 parser.add_argument('--init', type=str, default='default', choices=['default', 'orth'])
+parser.add_argument('--teacher_targets_save_path', type=str, default='teacher_targets.npy')
 args = parser.parse_args()
 
 def check_n_pose(n_pose):
