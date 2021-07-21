@@ -11,12 +11,12 @@ import torch.nn.functional as F
 from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
-from run_nerf_helpers_v2 import NeRF, NeRF_v2, sample_pdf, ndc_rays, get_rays, get_embedder, get_novel_poses
+from run_nerf_helpers_v2 import NeRF, NeRF_v2, sample_pdf, ndc_rays, get_rays, get_embedder
 from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data, setup_blender_datadir_v2 as setup_blender_datadir, save_blender_data
+from load_blender import load_blender_data, setup_blender_datadir_v2 as setup_blender_datadir, save_blender_data, get_novel_poses
 import copy
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
