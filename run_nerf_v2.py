@@ -762,12 +762,11 @@ def train():
             kd_targets = get_teacher_target_v2(kd_poses, H, W, focal, render_kwargs_train, args)
             n_total_img = len(kd_poses) + len(train_images)
             pr = len(kd_poses) / n_total_img
-        n_seen_img = 0
         print(f'Loaded data. Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f} ')
 
     # training
     timer = Timer((args.N_iters - start) // args.i_testset)
-    hist_loss, hist_psnr, n_pseudo_img = 0, 0, 0
+    hist_loss, hist_psnr, n_pseudo_img, n_seen_img = 0, 0, 0, 0
     global global_step
     print('Begin training')
     for i in trange(start+1, args.N_iters+1):
@@ -819,7 +818,6 @@ def train():
                         t_ = time.time()
                         pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
                         trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
-                        n_seen_img = 0 # reset
                         print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f}')
 
                 # get pose and target
