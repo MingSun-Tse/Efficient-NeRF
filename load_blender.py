@@ -74,30 +74,8 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=Fa
     camera_angle_x = float(meta['camera_angle_x'])
     focal = .5 * W / np.tan(.5 * camera_angle_x)
     
-    # @mst: add noise jittering
-    if isinstance(n_pose, int):
-        thetas = np.linspace(-180, 180, n_pose + 1)
-        phis = [-30]
-    else:
-        thetas = np.linspace(-180, 180, n_pose[0] + 1)
-        phis = np.linspace(-90, 0, n_pose[1] + 1)
-    
-    if perturb:
-        lower, upper = thetas[..., :-1], thetas[..., 1:]
-        rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
-        thetas = lower + (upper - lower) * rand
-    else:
-        thetas = thetas[:-1]
-
-    if not isinstance(n_pose, int):
-        if perturb:
-            lower, upper = phis[..., :-1], phis[..., 1:]
-            rand = torch.rand(lower.shape).data.cpu().numpy() # uniform dist [0, 1)
-            phis = lower + (upper - lower) * rand
-        else:
-            phis = phis[:-1]
-
-    render_poses = torch.stack([pose_spherical(t, p, 4) for p in phis for t in thetas], 0)
+    thetas = np.linspace(-180, 180, n_pose + 1)[:-1]
+    render_poses = torch.stack([pose_spherical(t, -30, 4) for t in thetas], 0)
 
     if half_res:
         H = H//2
@@ -246,12 +224,21 @@ def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
         near, far = 2, 6
         if isinstance(n_pose, int):
             thetas = np.linspace(theta1, theta2, n_pose+1)[:-1]
-            phis = [-72]
-            radiuses = [5]
-        else:
-            thetas = np.linspace(theta1, theta2, n_pose[0]+1)[:-1]
-            phis = np.linspace(phi1, phi2, n_pose[1]+2)[1: -1]
-            radiuses = np.linspace(near, far, n_pose[2]+2)[1: -1]
+            phis = [-30]
+            radiuses = [4]
+        else: # n_pose is a list
+            if ':' not in n_pose[0]:
+                n_pose = [int(x) for x in n_pose]
+                thetas = np.linspace(theta1, theta2, n_pose[0]+1)[:-1]
+                phis = np.linspace(phi1, phi2, n_pose[1]+2)[1: -1]
+                radiuses = np.linspace(near, far, n_pose[2]+2)[1: -1]
+            else:
+                mode, value = n_pose[0].split(':')
+                thetas = np.linspace(theta1, theta2, int(value)+1)[:-1] if mode == 'sample' else [float(value)]
+                mode, value = n_pose[1].split(':')
+                phis = np.linspace(phi1, phi2, int(value)+2)[1:-1] if mode == 'sample' else [float(value)]
+                mode, value = n_pose[2].split(':')
+                radiuses = np.linspace(near, far, int(value)+2)[1:-1] if mode == 'sample' else [float(value)]
         novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
     
     elif args.dataset_type == 'llff':

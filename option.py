@@ -144,6 +144,7 @@ parser.add_argument('--n_pose_kd', type=str, default='100',
         help='num of poses in rendering the video when using KD')
 parser.add_argument('--kd_with_render_pose', action="store_true",
 	help='deprecated args. Will be removed')
+parser.add_argument('--video_tag', type=str, default='')
 parser.add_argument('--kd_with_render_pose_mode', type=str, default='partial_render_pose', choices=['partial_render_pose', 'all_render_pose'],
         help='all_render_pose: all the training poses are generated novel poses, not from training images')
 parser.add_argument('--video_poses_perturb', action="store_true")
@@ -155,15 +156,19 @@ parser.add_argument('--i_update_data', type=int, default=500,
 parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0.9')
 parser.add_argument('--init', type=str, default='default', choices=['default', 'orth'])
 parser.add_argument('--teacher_targets_save_path', type=str, default='teacher_targets.npy')
+parser.add_argument('--trans_origin', type=str, default='', choices=['', 'fixed', 'adapative'])
 args = parser.parse_args()
 
+if args.video_tag == '':
+    args.video_rag = f'pose{args.n_pose_video}'
+    
 def check_n_pose(n_pose):
-	if n_pose.lower() == 'none':
-		return None
-	if n_pose.isdigit():
-		return int(n_pose)
-	else:
-		return [int(x) for x in n_pose.split(',')]
+    if n_pose.lower() == 'none':
+        return None
+    if n_pose.isdigit():
+        return int(n_pose)
+    else:
+        return n_pose.split(',')
 
 args.n_pose_kd = check_n_pose(args.n_pose_kd)
 args.n_pose_video = check_n_pose(args.n_pose_video)

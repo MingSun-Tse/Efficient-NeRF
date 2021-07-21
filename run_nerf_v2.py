@@ -1,29 +1,37 @@
-import os, sys
-import numpy as np
+import os, sys, copy, numpy as np, time, random, json
 import imageio
-import json
-import random
-import time
+from tqdm import tqdm, trange
+import matplotlib.pyplot as plt
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm, trange
-
-import matplotlib.pyplot as plt
 from run_nerf_helpers_v2 import NeRF, NeRF_v2, sample_pdf, ndc_rays, get_rays, get_embedder
 from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights
-
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, BlenderDataset, get_novel_poses
-import copy
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
 DEBUG = False
 
+# set up logging directories -------
+from logger import Logger
+from utils import Timer, check_path, LossLine, PresetLRScheduler, strdict_to_dict, _weights_init_orthogonal
+from option import args
+
+logger = Logger(args)
+print = logger.log_printer.logprint
+accprint = logger.log_printer.accprint
+netprint = logger.log_printer.netprint
+ExpID = logger.ExpID
+
+# redefine get_rays
+from functools import partial
+get_rays = partial(get_rays, trans_origin=args.trans_origin)
+# ---------------------------------
 
 def batchify(fn, chunk):
     """Constructs a version of 'fn' that applies to smaller batches.
@@ -560,18 +568,6 @@ def get_pseudo_ratio(schedule, current_step):
         pr = (prs[1] - prs[0]) / (steps[1] - steps[0]) * (current_step - steps[0]) + prs[0]
     return pr
 
-# set up logging directories -------
-from logger import Logger
-from utils import Timer, check_path, LossLine, PresetLRScheduler, strdict_to_dict, _weights_init_orthogonal
-from option import args
-
-logger = Logger(args)
-print = logger.log_printer.logprint
-accprint = logger.log_printer.accprint
-netprint = logger.log_printer.netprint
-ExpID = logger.ExpID
-# ---------------------------------
-
 def train():
     # Load data
     if args.dataset_type == 'llff':
@@ -600,7 +596,7 @@ def train():
         print('NEAR FAR', near, far)
 
     elif args.dataset_type == 'blender':
-        images, poses, render_poses, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip, n_pose=args.n_pose_video)
+        images, poses, render_poses, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip)
         print('Loaded blender', images.shape, poses.shape, render_poses.shape, hwf, args.datadir)
         # Loaded blender (138, 400, 400, 4) (138, 4, 4) torch.Size([40, 4, 4]) [400, 400, 555.5555155968841] ./data/nerf_synthetic/lego
         i_train, i_val, i_test = i_split
@@ -719,7 +715,7 @@ def train():
                     video_poses = render_poses
                 print(f'Rendering video... (n_pose: {len(video_poses)})')
                 rgbs, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=None, savedir=logger.gen_img_path, render_factor=args.render_factor, new_render_func=new_render_func)
-        video_path = f'{logger.gen_img_path}/video_pose{args.n_pose_video}_{exp_id}_iter{iter}.mp4'
+        video_path = f'{logger.gen_img_path}/video_{ExpID}_iter{i}_{args.video_tag}.mp4'
         imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
         print(f'Save video: "{video_path}"')
         exit()
@@ -947,7 +943,7 @@ def train():
                 gt_imgs = kd_targets if args.datadir_kd and kd_poses is not None and (video_poses-kd_poses).abs().sum() == 0 else None
                 rgbs, disps, *_, video_loss, video_psnr = render_path(video_poses, hwf, args.chunk, render_kwargs_test, 
                         gt_imgs=gt_imgs,render_factor=args.render_factor, new_render_func=new_render_func)
-            video_path = f'{logger.gen_img_path}/video_pose{args.n_pose_video}_{ExpID}_iter{i}.mp4'
+            video_path = f'{logger.gen_img_path}/video_{ExpID}_iter{i}_{args.video_tag}.mp4'
             imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
             # imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
             print(f'[VIDEO] Rendering done. Time {(time.time() - t_):.2f}s. Save video: "{video_path}"')
