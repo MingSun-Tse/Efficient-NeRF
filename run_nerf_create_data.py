@@ -12,8 +12,7 @@ from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
 
-from run_nerf_helpers import NeRF, sample_pdf
-from run_nerf_helpers_v2 import NeRF_v2, img2mse, mse2psnr, to8b, get_rays, get_embedder, get_novel_poses, get_novel_poses_v2
+from run_nerf_helpers_v2 import NeRF, sample_pdf, img2mse, mse2psnr, to8b, get_rays, get_embedder, get_novel_poses
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
