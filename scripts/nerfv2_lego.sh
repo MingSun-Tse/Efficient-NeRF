@@ -28,9 +28,10 @@ CUDA_VISIBLE_DEVICES=3 python run_nerf_v2.py --config configs/fern.txt --n_sampl
 
 
 ## Test: nerf, lego
-CUDA_VISIBLE_DEVICES=0 python run_nerf_v2.py --config configs/lego.txt --model_name nerf --pretrained_ckpt Experiments/*-195444/*/200000.tar --render_only --n_pose_video 10,4,3 --debug
-# test changing H, W
-CUDA_VISIBLE_DEVICES=0 python run_nerf_v2.py --config configs/lego.txt --model_name nerf --pretrained_ckpt Experiments/*-195444/*/200000.tar --render_only --n_pose_video 10 --half_res False --debug
+# new n_pose
+CUDA_VISIBLE_DEVICES=2 python run_nerf_v2.py --config configs/lego.txt --model_name nerf --pretrained_ckpt Experiments/*-195444/*/200000.tar --render_only --n_pose_video sample:20,fixed:-72,fixed:5 --video_tag 20ThetasPhi-72Radius5 --project Test_nerf_lego_20ThetasPhi-72Radius5 --screen --debug
+
+CUDA_VISIBLE_DEVICES=2 python run_nerf_v2.py --config configs/lego.txt --model_name nerf --pretrained_ckpt Experiments/*-195444/*/200000.tar --render_only --n_pose_video sample:20,fixed:-72,fixed:5 --trans_origin fixed --video_tag 20ThetasPhi-72Radius5_TransOriginFixed --project Test_nerf_lego_20ThetasPhi-72Radius5_TransOriginFixed --screen --debug 
 
 ## Test: nerf, fern
 CUDA_VISIBLE_DEVICES=3 python run_nerf_v2.py --config configs/fern.txt --model_name nerf --pretrained_ckpt Experiments/*-181900/*/200000.tar --render_only --render_test --debug

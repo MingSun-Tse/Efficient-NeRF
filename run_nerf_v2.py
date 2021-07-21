@@ -702,7 +702,7 @@ def train():
     # Short circuit if only rendering out from trained model
     if args.render_only:
         print('RENDER ONLY')
-        exp_id, iter = parse_expid_iter(args.pretrained_ckpt)
+        exp_id, iter_ = parse_expid_iter(args.pretrained_ckpt)
         with torch.no_grad():
             if args.render_test:
                 print('Rendering test images...')
@@ -715,7 +715,7 @@ def train():
                     video_poses = render_poses
                 print(f'Rendering video... (n_pose: {len(video_poses)})')
                 rgbs, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=None, savedir=logger.gen_img_path, render_factor=args.render_factor, new_render_func=new_render_func)
-        video_path = f'{logger.gen_img_path}/video_{ExpID}_iter{i}_{args.video_tag}.mp4'
+        video_path = f'{logger.gen_img_path}/video_{exp_id}_iter{iter_}_{args.video_tag}.mp4'
         imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
         print(f'Save video: "{video_path}"')
         exit()
