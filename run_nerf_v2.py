@@ -11,13 +11,12 @@ import torch.nn.functional as F
 from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
-from run_nerf_helpers_v2 import NeRF, NeRF_v2, sample_pdf, ndc_rays, get_rays, get_embedder, get_novel_poses
-from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse
+from run_nerf_helpers_v2 import NeRF, NeRF_v2, sample_pdf, ndc_rays, get_rays, get_embedder
+from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data, BlenderDataset
-from collections import OrderedDict
+from load_blender import load_blender_data, BlenderDataset, get_novel_poses
 import copy
 
 
@@ -181,18 +180,6 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
 
     return rgbs, disps, test_loss, test_psnr
 
-def _load_weights(model, ckpt_path, key):
-    ckpt_path = check_path(ckpt_path)
-    ckpt = torch.load(ckpt_path)
-    state_dict = ckpt[key]
-    new_state_dict = OrderedDict()
-    for k, v in state_dict.items():
-        if 'module.' in k:
-            k = k[7:]
-        new_state_dict[k] = v
-    model.load_state_dict(new_state_dict)
-    return ckpt_path, ckpt
-
 def create_nerf(args, near, far):
     """Instantiate NeRF's MLP model.
     """
@@ -245,8 +232,8 @@ def create_nerf(args, near, far):
             param.requires_grad = False
         
         # load weights
-        ckpt_path, ckpt = _load_weights(teacher_fn, args.teacher_ckpt, 'network_fn_state_dict')
-        ckpt_path, ckpt = _load_weights(teacher_fine, args.teacher_ckpt, 'network_fine_state_dict')
+        ckpt_path, ckpt = load_weights(teacher_fn, args.teacher_ckpt, 'network_fn_state_dict')
+        ckpt_path, ckpt = load_weights(teacher_fine, args.teacher_ckpt, 'network_fine_state_dict')
         print(f'Load teacher ckpt successfully: "{ckpt_path}"')
 
         # get network_query_fn
@@ -265,9 +252,9 @@ def create_nerf(args, near, far):
 
     # load pretrained checkpoint
     if args.pretrained_ckpt:
-        ckpt_path, ckpt = _load_weights(model, args.pretrained_ckpt, 'network_fn_state_dict')
+        ckpt_path, ckpt = load_weights(model, args.pretrained_ckpt, 'network_fn_state_dict')
         if model_fine is not None:
-            _load_weights(model_fine, args.pretrained_ckpt, 'network_fine_state_dict')
+            load_weights(model_fine, args.pretrained_ckpt, 'network_fine_state_dict')
         print('Load pretrained ckpt successfully: "%s"' % ckpt_path)
         
         if args.resume:
@@ -434,9 +421,6 @@ def render_rays(ray_batch,
 
         z_vals = lower + (upper - lower) * t_rand
     
-    for i in range(10):
-        print(f'{i}: {rays_o[i].norm():.4f}')
-
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
     # when training: [1024, 1, 3] + [1024, 1, 3] * [1024, 64, 1]
     # rays_d range: [-1, 1]
@@ -478,18 +462,6 @@ def render_rays(ray_batch,
 
     return ret
 
-# set up logging directories -------
-from logger import Logger
-from utils import Timer, check_path, LossLine, PresetLRScheduler, strdict_to_dict, _weights_init_orthogonal
-from option import args
-
-logger = Logger(args)
-print = logger.log_printer.logprint
-accprint = logger.log_printer.accprint
-netprint = logger.log_printer.netprint
-ExpID = logger.ExpID
-# ---------------------------------
-
 def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
     render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
@@ -513,6 +485,8 @@ def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     return teacher_target
 
 def get_teacher_target_v2(poses, H, W, focal, render_kwargs_train, args):
+    '''Save teacher target as .npy
+    '''
     if os.path.exists(args.teacher_targets_save_path):
         rgbs = np.load(args.teacher_targets_save_path)
         rgbs = to_tensor(rgbs)
@@ -530,7 +504,7 @@ def get_teacher_target_v2(poses, H, W, focal, render_kwargs_train, args):
         render_kwargs_.pop('teacher_fine')
         rgbs, *_ = render_path(poses, hwf, args.chunk, render_kwargs_, render_factor=args.render_factor, new_render_func=False)
         # check pseudo images
-        savedir = f'{logger.gen_img_path}/teacher_targets_{ExpID}'
+        savedir = f'{logger.gen_img_path}/teacher_targets_{ExpID}.npy'
         if not os.path.exists(savedir):
             os.makedirs(savedir)
         for ix, rgb in enumerate(rgbs):
@@ -585,6 +559,18 @@ def get_pseudo_ratio(schedule, current_step):
     else:
         pr = (prs[1] - prs[0]) / (steps[1] - steps[0]) * (current_step - steps[0]) + prs[0]
     return pr
+
+# set up logging directories -------
+from logger import Logger
+from utils import Timer, check_path, LossLine, PresetLRScheduler, strdict_to_dict, _weights_init_orthogonal
+from option import args
+
+logger = Logger(args)
+print = logger.log_printer.logprint
+accprint = logger.log_printer.accprint
+netprint = logger.log_printer.netprint
+ExpID = logger.ExpID
+# ---------------------------------
 
 def train():
     # Load data
@@ -769,6 +755,7 @@ def train():
         if args.dataset_type == 'blender':
             pr = get_pseudo_ratio(args.pseudo_ratio_schedule, current_step=start+1)
             trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
+            kd_poses = None
         else: # LLFF dataset
             kd_poses = copy.deepcopy(render_poses)
             print(f'Using teacher to render {len(kd_poses)} images for KD...')
@@ -907,14 +894,6 @@ def train():
                     else:
                         rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
                 
-                # check rgb
-                # if i % 10 == 0:
-                #     savedir = f'{logger.gen_img_path}/rgb_during_train_{ExpID}'
-                #     if not os.path.exists(savedir):
-                #         os.makedirs(savedir)
-                #     for ix, im in enumerate(rgb):
-                #         imageio.imwrite(f'{savedir}/iter{i}_{ix}.png', to8b(im.data.cpu().numpy()))
-                
                 # print(rays_o.shape, rays_d.shape, rgb.shape, target_s.shape, img_i) # check shape
                 img_loss = img2mse(rgb, target_s)
                 loss += img_loss
@@ -967,8 +946,8 @@ def train():
             with torch.no_grad():
                 print(f'Iter {i} Rendering video... (n_pose: {len(video_poses)})')
                 t_ = time.time()
-                gt_imgs = kd_targets if args.datadir_kd and (video_poses-kd_poses).abs().sum() == 0 else None
-                rgbs, disps, *_, video_loss, video_psnr = render_path(kd_poses, hwf, args.chunk, render_kwargs_test, 
+                gt_imgs = kd_targets if args.datadir_kd and kd_poses is not None and (video_poses-kd_poses).abs().sum() == 0 else None
+                rgbs, disps, *_, video_loss, video_psnr = render_path(video_poses, hwf, args.chunk, render_kwargs_test, 
                         gt_imgs=gt_imgs,render_factor=args.render_factor, new_render_func=new_render_func)
             video_path = f'{logger.gen_img_path}/video_pose{args.n_pose_video}_{ExpID}_iter{i}.mp4'
             imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)

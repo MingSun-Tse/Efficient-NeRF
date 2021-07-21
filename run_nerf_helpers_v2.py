@@ -4,7 +4,6 @@ torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn 
 import torch.nn.functional as F
 import numpy as np, time
-from load_blender import pose_spherical
 
 # TODO: remove this dependency
 from torchsearchsorted import searchsorted
@@ -484,7 +483,9 @@ def get_rays(H, W, focal, c2w, trans_origin=False):
     j = j.t().to(device)
     dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1)
     # Rotate ray directions from camera frame to the world frame
-    rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
+    # rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
+    rays_d = torch.sum(dirs.unsqueeze(dim=-2) * c2w[:3,:3], -1)  # use pytorch style
+    
     # Translate camera frame's origin to the world frame. It is the origin of all rays.
     rays_o = c2w[:3,-1].expand(rays_d.shape)
     if trans_origin:
@@ -564,38 +565,6 @@ def parse_expid_iter(path):
     expid = 'SERVER' + path.split('_SERVER')[1].split('/')[0]
     iter = path.split('/')[-1].split('.tar')[0]
     return expid, iter
-
-def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
-    '''Even-spaced sampling
-    '''
-    if args.dataset_type == 'blender':
-        near, far = 2, 6
-        if isinstance(n_pose, int):
-            thetas = np.linspace(theta1, theta2, n_pose+1)[:-1]
-            phis = [-72]
-            radiuses = [5]
-        else:
-            thetas = np.linspace(theta1, theta2, n_pose[0]+1)[:-1]
-            phis = np.linspace(phi1, phi2, n_pose[1]+2)[1: -1]
-            radiuses = np.linspace(near, far, n_pose[2]+2)[1: -1]
-        novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
-    
-    elif args.dataset_type == 'llff':
-        pass
-
-    return to_tensor(novel_poses)
-
-def get_novel_poses_v2(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
-    '''Random sampling
-    '''
-    assert args.dataset_type in ['blender']
-    if args.dataset_type == 'blender':
-        near, far = 2, 6
-        thetas = theta1 + np.random.rand(n_pose[0]) * (theta2 - theta1)
-        phis = phi1 + np.random.rand(n_pose[1]) * (phi2 - phi1)
-        radiuses = near + np.random.rand(n_pose[2]) * (far - near)
-        novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
-    return novel_poses
 
 def load_weights(model, ckpt_path, key):
     from utils import check_path

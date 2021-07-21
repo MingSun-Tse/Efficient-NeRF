@@ -6,7 +6,7 @@ import json
 import torch.nn.functional as F
 import cv2
 from torch.utils.data import Dataset
-to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
+from run_nerf_helpers_v2 import to_tensor, to8b
 
 trans_t = lambda t : torch.Tensor([
     [1,0,0,0],
@@ -110,7 +110,7 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=Fa
         imgs = imgs_half_res
         # imgs = tf.image.resize_area(imgs, [400, 400]).numpy()
 
-    return imgs, poses, render_poses, [H, W, focal], i_split
+    return to_tensor(imgs), to_tensor(poses), to_tensor(render_poses), [H, W, focal], i_split
 
 def setup_blender_datadir(datadir_old, datadir_new):
     import shutil
@@ -238,3 +238,36 @@ class BlenderDataset(Dataset):
 
     def __len__(self):
         return len(self.frames)
+
+def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
+    '''Even-spaced sampling
+    '''
+    if args.dataset_type == 'blender':
+        near, far = 2, 6
+        if isinstance(n_pose, int):
+            thetas = np.linspace(theta1, theta2, n_pose+1)[:-1]
+            phis = [-72]
+            radiuses = [5]
+        else:
+            thetas = np.linspace(theta1, theta2, n_pose[0]+1)[:-1]
+            phis = np.linspace(phi1, phi2, n_pose[1]+2)[1: -1]
+            radiuses = np.linspace(near, far, n_pose[2]+2)[1: -1]
+        novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
+    
+    elif args.dataset_type == 'llff':
+        pass
+
+    return to_tensor(novel_poses)
+
+def get_novel_poses_v2(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
+    '''Random sampling
+    '''
+    assert args.dataset_type in ['blender']
+    if args.dataset_type == 'blender':
+        near, far = 2, 6
+        thetas = theta1 + np.random.rand(n_pose[0]) * (theta2 - theta1)
+        phis = phi1 + np.random.rand(n_pose[1]) * (phi2 - phi1)
+        radiuses = near + np.random.rand(n_pose[2]) * (far - near)
+        novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
+    return novel_poses
+
