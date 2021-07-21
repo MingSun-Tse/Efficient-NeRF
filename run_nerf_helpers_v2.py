@@ -147,6 +147,89 @@ def run_network(inputs, viewdirs, fn, embed_fn, embeddirs_fn, netchunk=1024*64):
     outputs = torch.reshape(outputs_flat, list(inputs.shape[:-1]) + [outputs_flat.shape[-1]])
     return outputs
 
+class NeRF(nn.Module):
+    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, output_ch=4, skips=[4], use_viewdirs=False):
+        """ 
+        """
+        super(NeRF, self).__init__()
+        self.D = D
+        self.W = W
+        self.input_ch = input_ch
+        self.input_ch_views = input_ch_views
+        self.skips = skips
+        self.use_viewdirs = use_viewdirs
+        
+        self.pts_linears = nn.ModuleList(
+            [nn.Linear(input_ch, W)] + [nn.Linear(W, W) if i not in self.skips else nn.Linear(W + input_ch, W) for i in range(D-1)])
+        
+        ### Implementation according to the official code release (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
+        self.views_linears = nn.ModuleList([nn.Linear(input_ch_views + W, W//2)])
+
+        ### Implementation according to the paper
+        # self.views_linears = nn.ModuleList(
+        #     [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2, W//2) for i in range(D//2)])
+        
+        if use_viewdirs:
+            self.feature_linear = nn.Linear(W, W)
+            self.alpha_linear = nn.Linear(W, 1)
+            self.rgb_linear = nn.Linear(W//2, 3)
+        else:
+            self.output_linear = nn.Linear(W, output_ch)
+
+    def forward(self, x):
+        input_pts, input_views = torch.split(x, [self.input_ch, self.input_ch_views], dim=-1)
+        h = input_pts
+        for i, l in enumerate(self.pts_linears):
+            h = self.pts_linears[i](h)
+            h = F.relu(h)
+            if i in self.skips:
+                h = torch.cat([input_pts, h], -1)
+
+        if self.use_viewdirs:
+            alpha = self.alpha_linear(h)
+            feature = self.feature_linear(h)
+            h = torch.cat([feature, input_views], -1)
+        
+            for i, l in enumerate(self.views_linears):
+                h = self.views_linears[i](h)
+                h = F.relu(h)
+
+            rgb = self.rgb_linear(h)
+            outputs = torch.cat([rgb, alpha], -1)
+        else:
+            outputs = self.output_linear(h)
+
+        return outputs    
+
+    def load_weights_from_keras(self, weights):
+        assert self.use_viewdirs, "Not implemented if use_viewdirs=False"
+        
+        # Load pts_linears
+        for i in range(self.D):
+            idx_pts_linears = 2 * i
+            self.pts_linears[i].weight.data = torch.from_numpy(np.transpose(weights[idx_pts_linears]))    
+            self.pts_linears[i].bias.data = torch.from_numpy(np.transpose(weights[idx_pts_linears+1]))
+        
+        # Load feature_linear
+        idx_feature_linear = 2 * self.D
+        self.feature_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_feature_linear]))
+        self.feature_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_feature_linear+1]))
+
+        # Load views_linears
+        idx_views_linears = 2 * self.D + 2
+        self.views_linears[0].weight.data = torch.from_numpy(np.transpose(weights[idx_views_linears]))
+        self.views_linears[0].bias.data = torch.from_numpy(np.transpose(weights[idx_views_linears+1]))
+
+        # Load rgb_linear
+        idx_rbg_linear = 2 * self.D + 4
+        self.rgb_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear]))
+        self.rgb_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear+1]))
+
+        # Load alpha_linear
+        idx_alpha_linear = 2 * self.D + 6
+        self.alpha_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear]))
+        self.alpha_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear+1]))
+        
 class NeRF_v2(nn.Module):
     '''New idea: one forward to get multi-outputs.
     '''
@@ -368,8 +451,34 @@ class NeRF_v2(nn.Module):
         return rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs, loss_perm_invar
 
 
+def translate_origin_v2(rays_o, rays_d):
+    rays_o_new = []
+    rays_o_norm = 3.6
+    for ro, rd in zip(rays_o, rays_d):
+        rd_ = rd / rd.norm()
+        # m^2 + d^2 -2mcos(theta) * d = n^2
+        # d^2 - 2mcos(theta) * d + m^2 - n^2 = 0
+        m, n = ro.norm(), rays_o_norm
+        cos_theta = -(ro * rd_).sum() / m
+        d1 = m * cos_theta + torch.sqrt(m**2 * cos_theta**2 - m**2 + n**2)
+        d2 = m * cos_theta - torch.sqrt(m**2 * cos_theta**2 - m**2 + n**2)
+        d = max(d1, d2) if d1*d2 < 0 else d1.sign() * min(d1.abs(), d2.abs())
+        ro_ = ro + d * rd_
+        rays_o_new += [ro_]
+    return torch.stack(rays_o_new, dim=0)
+
+def translate_origin(rays_o, rays_d):
+    rays_o_new = []
+    rays_o_norm = 3.6
+    ro, rd = rays_o[0], rays_d[0]
+    rd_ = rd / rd.norm()
+    for d in range(100): # 100 is hand-chosen
+        if (ro + d * rd_).norm() <= rays_o_norm:
+            break
+    return rays_o + d * (rays_d / rays_d.norm(dim=1))
+
 # Ray helpers
-def get_rays(H, W, focal, c2w):
+def get_rays(H, W, focal, c2w, trans_origin=False):
     i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H)) # pytorch's meshgrid has indexing='ij'
     i = i.t().to(device)
     j = j.t().to(device)
@@ -378,6 +487,8 @@ def get_rays(H, W, focal, c2w):
     rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
     # Translate camera frame's origin to the world frame. It is the origin of all rays.
     rays_o = c2w[:3,-1].expand(rays_d.shape)
+    if trans_origin:
+        rays_o = translate_origin(rays_o, rays_d)
     return rays_o, rays_d
 
 def ndc_rays(H, W, focal, near, rays_o, rays_d):
@@ -399,6 +510,53 @@ def ndc_rays(H, W, focal, near, rays_o, rays_d):
     
     return rays_o, rays_d
 
+# Hierarchical sampling (section 5.2)
+def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
+    # Get pdf
+    weights = weights + 1e-5 # prevent nans
+    pdf = weights / torch.sum(weights, -1, keepdim=True)
+    cdf = torch.cumsum(pdf, -1)
+    cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
+
+    # Take uniform samples
+    if det:
+        u = torch.linspace(0., 1., steps=N_samples)
+        u = u.expand(list(cdf.shape[:-1]) + [N_samples])
+    else:
+        u = torch.rand(list(cdf.shape[:-1]) + [N_samples])
+
+    # Pytest, overwrite u with numpy's fixed random numbers
+    if pytest:
+        np.random.seed(0)
+        new_shape = list(cdf.shape[:-1]) + [N_samples]
+        if det:
+            u = np.linspace(0., 1., N_samples)
+            u = np.broadcast_to(u, new_shape)
+        else:
+            u = np.random.rand(*new_shape)
+        u = torch.Tensor(u)
+
+    # Invert CDF
+    u = u.contiguous()
+    # cdf, u = cdf.cpu(), u.cpu() # @mst: searchsorted GPU does not work on aws for now, so use cpu()
+    inds = searchsorted(cdf, u, side='right')
+    below = torch.max(torch.zeros_like(inds-1), inds-1)
+    above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
+    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
+
+    # cdf_g = tf.gather(cdf, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    # bins_g = tf.gather(bins, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    denom = (cdf_g[...,1]-cdf_g[...,0])
+    denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
+    t = (u-cdf_g[...,0])/denom
+    samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
+
+    return samples
+
 def parse_expid_iter(path):
     '''parse out experiment id and iteration for pretrained ckpt.
     path example: Experiments/nerfv2__lego__S4W1024D32Skip8,16,24_DPRGB_KDWRenderPose100All_BS16384_SERVER142-20210704-150540/weights/200000.tar
@@ -408,12 +566,14 @@ def parse_expid_iter(path):
     return expid, iter
 
 def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
+    '''Even-spaced sampling
+    '''
     if args.dataset_type == 'blender':
         near, far = 2, 6
         if isinstance(n_pose, int):
             thetas = np.linspace(theta1, theta2, n_pose+1)[:-1]
-            phis = [-30]
-            radiuses = [4]
+            phis = [-72]
+            radiuses = [5]
         else:
             thetas = np.linspace(theta1, theta2, n_pose[0]+1)[:-1]
             phis = np.linspace(phi1, phi2, n_pose[1]+2)[1: -1]

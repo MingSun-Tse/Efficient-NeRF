@@ -11,9 +11,7 @@ import torch.nn.functional as F
 from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
-
-from run_nerf_helpers import NeRF, sample_pdf, ndc_rays
-from run_nerf_helpers_v2 import NeRF_v2, get_rays, get_embedder, get_novel_poses
+from run_nerf_helpers_v2 import NeRF, NeRF_v2, sample_pdf, ndc_rays, get_rays, get_embedder, get_novel_poses
 from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse
 
 from load_llff import load_llff_data
@@ -436,6 +434,9 @@ def render_rays(ray_batch,
 
         z_vals = lower + (upper - lower) * t_rand
     
+    for i in range(10):
+        print(f'{i}: {rays_o[i].norm():.4f}')
+
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
     # when training: [1024, 1, 3] + [1024, 1, 3] * [1024, 64, 1]
     # rays_d range: [-1, 1]
@@ -677,16 +678,13 @@ def train():
     print(f'train_images shape {train_images.shape} train_poses shape {train_images.shape}')
 
     # Create log dir and copy the config file
-    basedir = logger.exp_path # args.basedir @mst: use our experiment path
-    expname = args.expname
-    os.makedirs(os.path.join(basedir, expname), exist_ok=True)
-    f = os.path.join(basedir, expname, 'args.txt')
+    f = f'{logger.log_path}/args.txt'
     with open(f, 'w') as file:
         for arg in sorted(vars(args)):
             attr = getattr(args, arg)
             file.write('{} = {}\n'.format(arg, attr))
     if args.config is not None:
-        f = os.path.join(basedir, expname, 'config.txt')
+        f = f'{logger.log_path}/config.txt'
         with open(f, 'w') as file:
             file.write(open(args.config, 'r').read())
 
@@ -723,12 +721,10 @@ def train():
     if args.render_only:
         print('RENDER ONLY')
         exp_id, iter = parse_expid_iter(args.pretrained_ckpt)
-        testsavedir = os.path.join(basedir, expname, 'renderonly_{}_{}'.format(exp_id, 'test' if args.render_test else 'path'))
-        os.makedirs(testsavedir, exist_ok=True)
         with torch.no_grad():
             if args.render_test:
                 print('Rendering test images...')
-                rgbs, *_, test_loss, test_psnr = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, savedir=testsavedir, render_factor=args.render_factor, new_render_func=new_render_func)
+                rgbs, *_, test_loss, test_psnr = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, savedir=logger.gen_img_path, render_factor=args.render_factor, new_render_func=new_render_func)
                 print(f'[TEST] Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
             else:
                 if args.dataset_type == 'blender':
@@ -736,8 +732,8 @@ def train():
                 else:
                     video_poses = render_poses
                 print(f'Rendering video... (n_pose: {len(video_poses)})')
-                rgbs, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=None, savedir=testsavedir, render_factor=args.render_factor, new_render_func=new_render_func)
-        video_path = os.path.join(testsavedir, f'video_pose{args.n_pose_video}_{exp_id}_iter{iter}.mp4')
+                rgbs, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=None, savedir=logger.gen_img_path, render_factor=args.render_factor, new_render_func=new_render_func)
+        video_path = f'{logger.gen_img_path}/video_pose{args.n_pose_video}_{exp_id}_iter{iter}.mp4'
         imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
         print(f'Save video: "{video_path}"')
         exit()
