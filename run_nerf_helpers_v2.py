@@ -3,7 +3,7 @@ import torch
 torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn 
 import torch.nn.functional as F
-import numpy as np
+import numpy as np, time
 from load_blender import pose_spherical
 
 # TODO: remove this dependency
@@ -229,7 +229,7 @@ class NeRF(nn.Module):
         idx_alpha_linear = 2 * self.D + 6
         self.alpha_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear]))
         self.alpha_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear+1]))
-        
+
 class NeRF_v2(nn.Module):
     '''New idea: one forward to get multi-outputs.
     '''
@@ -596,3 +596,17 @@ def get_novel_poses_v2(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
         radiuses = near + np.random.rand(n_pose[2]) * (far - near)
         novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
     return novel_poses
+
+def load_weights(model, ckpt_path, key):
+    from utils import check_path
+    from collections import OrderedDict
+    ckpt_path = check_path(ckpt_path)
+    ckpt = torch.load(ckpt_path)
+    state_dict = ckpt[key]
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        if 'module.' in k:
+            k = k[7:]
+        new_state_dict[k] = v
+    model.load_state_dict(new_state_dict)
+    return ckpt_path, ckpt
