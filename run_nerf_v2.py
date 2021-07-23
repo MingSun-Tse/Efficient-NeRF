@@ -193,7 +193,7 @@ def create_nerf(args, near, far):
     """
     # set up model
     model_fine = network_query_fn = None
-    if args.model_name == 'nerf':
+    if args.model_name in ['nerf']:
         embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
         input_ch_views = 0
         embeddirs_fn = None
@@ -859,6 +859,7 @@ def train():
                 target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
             
             loss = 0
+            t_ = time.time()
             if args.model_name == 'nerf':
                 rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
                                                         verbose=i < 10, retraw=True,
@@ -875,7 +876,6 @@ def train():
                     psnr0 = mse2psnr(img_loss0)
 
             elif args.model_name in ['nerf_v2']:
-                t_ = time.time()
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
                 if args.directly_predict_rgb:
@@ -894,8 +894,8 @@ def train():
                 psnr = mse2psnr(img_loss)
                 loss_line.update('loss_rgb', img_loss.item(), '.4f')
                 loss_line.update('psnr', psnr.item(), '.4f')
-                t_forward = time.time() - t_
             
+            t_forward = time.time() - t_
             t_ = time.time()
             optimizer.zero_grad()
             loss.backward()

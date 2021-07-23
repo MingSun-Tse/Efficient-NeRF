@@ -593,6 +593,7 @@ def config_parser():
     parser.add_argument('--test_interval', type=int, default=2000)
     parser.add_argument('--plot_interval', type=int, default=100000000)
     parser.add_argument('--save_interval', type=int, default=2000, help="the interval to save model")
+    parser.add_argument('--video_tag', type=str, default='')
 
     # added arguments (do not add new functionalities, just to make the hyper-param tuning more flexible)
     parser.add_argument('--skips', type=str, default='4')
@@ -682,16 +683,13 @@ def train():
         render_poses = np.array(poses[i_test])
 
     # Create log dir and copy the config file
-    basedir = logger.exp_path # args.basedir @mst: use our experiment path
-    expname = args.expname
-    os.makedirs(os.path.join(basedir, expname), exist_ok=True)
-    f = os.path.join(basedir, expname, 'args.txt')
+    f = f'{logger.log_path}/args.txt'
     with open(f, 'w') as file:
         for arg in sorted(vars(args)):
             attr = getattr(args, arg)
             file.write('{} = {}\n'.format(arg, attr))
     if args.config is not None:
-        f = os.path.join(basedir, expname, 'config.txt')
+        f = f'{logger.log_path}/config.txt'
         with open(f, 'w') as file:
             file.write(open(args.config, 'r').read())
 
@@ -862,7 +860,7 @@ def train():
 
         # test: using the splitted test images
         if i % args.i_testset == 0 and i > 0:
-            testsavedir = os.path.join(basedir, expname, 'testset_{:06d}'.format(i))
+            testsavedir = f'{logger.gen_img_path}/testset_{ExpID}_iter{i}' # save the renderred test images
             os.makedirs(testsavedir, exist_ok=True)
             with torch.no_grad():
                 *_, test_loss, test_psnr = render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
@@ -876,10 +874,9 @@ def train():
             with torch.no_grad():
                 rgbs, disps, *_ = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
             # print('Done, saving', rgbs.shape, disps.shape)
-            moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
-            rgb_path, disp_path = moviebase + 'rgb_%s.mp4' % ExpID, moviebase + 'disp_%s.mp4' % ExpID
-            imageio.mimwrite(rgb_path, to8b(rgbs), fps=30, quality=8)
-            imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
+            video_path = f'{logger.gen_img_path}/video_{ExpID}_iter{i}_{args.video_tag}.mp4'
+            imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
+            # imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
 
             # if args.use_viewdirs:
             #     render_kwargs_test['c2w_staticcam'] = render_poses[0][:3,:4]
@@ -888,11 +885,11 @@ def train():
             #     render_kwargs_test['c2w_staticcam'] = None
             #     imageio.mimwrite(moviebase + 'rgb_still.mp4', to8b(rgbs_still), fps=30, quality=8)
 
-            print(f'[VIDEO] Rendering done. Save video: "{rgb_path}"')
+            print(f'[VIDEO] Rendering done. Save video: "{video_path}"')
 
         # save checkpoint
         if i % args.i_weights == 0:
-            path = os.path.join(basedir, expname, '{:06d}.tar'.format(i))
+            path = os.path.join(logger.weights_path, '{:06d}.tar'.format(i))
             to_save = {
                 'global_step': global_step,
                 'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
