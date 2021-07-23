@@ -476,13 +476,13 @@ def translate_origin(rays_o, rays_d):
             break
     return rays_o + d * (rays_d / rays_d.norm(dim=1))
 
-def translate_origin_fixed(rays_o, rays_d):
+def translate_origin_fixed(rays_o, rays_d, scale):
     '''hand-tuned for blender dataset.
     '''
     rays_o_new = []
     for ro, rd in zip(rays_o, rays_d):
         rd_ = rd / rd.norm()
-        ro_ = ro + 30 * rd_
+        ro_ = ro + scale * rd_
         rays_o_new += [ro_]
     return torch.stack(rays_o_new, dim=0)
 
@@ -499,8 +499,14 @@ def get_rays(H, W, focal, c2w, trans_origin=''):
     # Translate camera frame's origin to the world frame. It is the origin of all rays.
     rays_o = c2w[:3,-1].expand(rays_d.shape)
     if trans_origin:
-        func = eval(f'translate_origin_{trans_origin}')
-        rays_o = func(rays_o, rays_d)
+        if trans_origin == 'adapative':
+            rays_o = translate_origin_adapative(rays_o, rays_d)
+        else:
+            scale = 30 if trans_origin == 'fixed' else float(trans_origin)
+            rays_o = translate_origin_fixed(rays_o, rays_d, scale=scale)
+        # print
+        for ix in range(20):
+            print(f'{ix}: {rays_o[ix].norm().item():.4f}')
     return rays_o, rays_d
 
 def ndc_rays(H, W, focal, near, rays_o, rays_d):

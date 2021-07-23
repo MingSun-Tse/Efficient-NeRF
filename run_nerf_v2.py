@@ -953,11 +953,16 @@ def train():
         # save checkpoint
         if i % args.i_weights == 0:
             path = os.path.join(logger.weights_path, '{:06d}.tar'.format(i))
-            torch.save({
+            to_save = {
                 'global_step': global_step,
+                'network_fn': render_kwargs_train['network_fn'],
                 'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-            }, path)
+            }
+            if args.model_name in ['nerf'] and args.N_importance > 0:
+                to_save['network_fine'] = render_kwargs_train['network_fine']
+                to_save['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
+            torch.save(to_save, path)
             print(f'Iter {i} Save checkpoint: "{path}"')
 
 if __name__=='__main__':
