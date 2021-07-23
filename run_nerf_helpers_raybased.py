@@ -607,3 +607,23 @@ def load_weights_v2(model, ckpt, key):
             k = k[7:]
         new_state_dict[k] = v
     model.load_state_dict(new_state_dict)
+
+def get_selected_coords(coords, N_rand, mode):
+    coords = coords.long() # [H, W, 2]
+    H, W = coords.shape[:2]
+    if mode == 'rand_pixel':
+        rand_ix = np.random.choice(H*W, size=[N_rand], replace=False)
+        coords = coords.view(-1, 2)  # [H*W, 2]
+        selected_coords = coords[rand_ix] # [N_rand, 2]
+        return selected_coords, None # None is placeholder for patch indices
+    
+    elif mode == 'rand_patch':
+        k = math.sqrt(float(N_rand) / H / W)
+        patch_h, patch_w = int(H * k), int(W * k)
+        bbh1 = np.random.randint(0, H - patch_h)
+        bbw1 = np.random.randint(0, W - patch_w)
+        bbh2 = bbh1 + patch_h
+        bbw2 = bbw1 + patch_w
+        selected_coords = coords[bbh1:bbh2, bbw1:bbw2, :] # [patch_h, patch_w, 2]
+        selected_coords = selected_coords.view(-1, 2) # [patch_h*patch_w, 2]
+        return selected_coords, [bbh1, bbw1, bbh2, bbw2]

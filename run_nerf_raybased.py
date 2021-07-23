@@ -7,9 +7,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # from torch.utils.tensorboard import SummaryWriter
-from model.nerf_v2 import NeRF, NeRF_v2
+from model.nerf_ray_based import NeRF, NeRF_v2, NeRF_v3
 from run_nerf_helpers_v2 import sample_pdf, ndc_rays, get_rays, get_embedder
-from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2
+from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2, get_selected_coords
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, BlenderDataset, get_novel_poses
@@ -223,6 +223,10 @@ def create_nerf(args, near, far):
             act_func = 'relu' # needs changes if the model does not use ReLU as activation func
             model.apply(lambda m: _weights_init_orthogonal(m, act=act_func))
             print(f'Use orth init. Activation func: {act_func}')
+        grad_vars = list(model.parameters())
+    
+    elif args.model_name in ['nerf_v3']:
+        model = NeRF_v3(args, near, far, device=device, print=netprint).to(device)
         grad_vars = list(model.parameters())
     
     # in KD, there is a pretrained teacher
@@ -860,12 +864,15 @@ def train():
                 else:
                     coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W)), -1)  # (H, W, 2)
 
-                coords = torch.reshape(coords, [-1, 2])  # (H * W, 2)
-                select_inds = np.random.choice(coords.shape[0], size=[N_rand], replace=False)  # (N_rand,)
-                select_coords = coords[select_inds].long()  # (N_rand, 2)
+                # select pixels as a batch
+                select_coords, patch_bbx = get_selected_coords(coords, N_rand, args.select_pixel_mode)
+
+                # get rays_o and rays_d for the selected pixels
                 rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 batch_rays = torch.stack([rays_o, rays_d], 0)
+                
+                # get target for the selected pixels
                 target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
             
             loss = 0
@@ -874,18 +881,10 @@ def train():
                 rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
                                                         verbose=i < 10, retraw=True,
                                                         **render_kwargs_train)
-                img_loss = img2mse(rgb, target_s)
-                trans = extras['raw'][...,-1]
-                loss += img_loss
-                psnr = mse2psnr(img_loss)
-                loss_line.update('loss_rgb', img_loss.item(), '.4f')
-                loss_line.update('psnr', psnr.item(), '.4f')
                 if 'rgb0' in extras:
-                    img_loss0 = img2mse(extras['rgb0'], target_s)
-                    loss += img_loss0
-                    psnr0 = mse2psnr(img_loss0)
+                    loss += img2mse(extras['rgb0'], target_s)
 
-            elif args.model_name in ['nerf_v2']:
+            elif args.model_name in ['nerf_v2', 'nerf_v3']:
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
                 if args.directly_predict_rgb:
@@ -898,13 +897,12 @@ def train():
                     else:
                         rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
                 
-                # print(rays_o.shape, rays_d.shape, rgb.shape, target_s.shape, img_i) # check shape
-                img_loss = img2mse(rgb, target_s)
-                loss += img_loss
-                psnr = mse2psnr(img_loss)
-                loss_line.update('loss_rgb', img_loss.item(), '.4f')
-                loss_line.update('psnr', psnr.item(), '.4f')
+            # loss
+            loss_rgb = img2mse(rgb, target_s); loss_line.update('loss_rgb', loss_rgb.item(), '.4f')
+            psnr = mse2psnr(loss_rgb); loss_line.update('psnr', psnr.item(), '.4f')
+            loss += loss_rgb
             
+            # backward and update
             t_forward = time.time() - t_
             t_ = time.time()
             optimizer.zero_grad()

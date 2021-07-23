@@ -159,6 +159,7 @@ parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0
 parser.add_argument('--init', type=str, default='default', choices=['default', 'orth'])
 parser.add_argument('--teacher_targets_save_path', type=str, default='teacher_targets.npy')
 parser.add_argument('--trans_origin', type=str, default='')
+parser.add_argument('--select_pixel_mode', type=str, default='rand_pixel', choices=['rand_pixel', 'rand_patch'])
 args = parser.parse_args()
 
 if args.video_tag == '':
