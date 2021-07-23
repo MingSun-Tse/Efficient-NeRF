@@ -7,7 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # from torch.utils.tensorboard import SummaryWriter
-from run_nerf_helpers_v2 import NeRF, NeRF_v2, sample_pdf, ndc_rays, get_rays, get_embedder
+from model.nerf_v2 import NeRF, NeRF_v2
+from run_nerf_helpers_v2 import sample_pdf, ndc_rays, get_rays, get_embedder
 from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data

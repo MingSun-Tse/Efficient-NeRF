@@ -3,7 +3,7 @@ import torch
 torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn 
 import torch.nn.functional as F
-import numpy as np, time
+import numpy as np, time, math
 
 # TODO: remove this dependency
 from torchsearchsorted import searchsorted
@@ -476,15 +476,19 @@ def translate_origin(rays_o, rays_d):
             break
     return rays_o + d * (rays_d / rays_d.norm(dim=1))
 
-def translate_origin_fixed(rays_o, rays_d, scale):
+def translate_origin_fixed(rays_o, rays_d, scale, n_print=0):
     '''hand-tuned for blender dataset.
     '''
-    rays_o_new = []
-    for ro, rd in zip(rays_o, rays_d):
-        rd_ = rd / rd.norm()
-        ro_ = ro + scale * rd_
-        rays_o_new += [ro_]
-    return torch.stack(rays_o_new, dim=0)
+    rd = rays_d / rays_d.norm(dim=-1, keepdim=True) # [H, W, 1]
+    ro = rays_o + scale * rd
+    
+    if n_print > 0:
+        k = int(math.sqrt(n_print))
+        rand_h, rand_w = np.random.permutation(ro.shape[0])[:k], np.random.permutation(ro.shape[1])[:k]
+        for h in rand_h:
+            for w in rand_w:
+                print(f'{(h, w)} rays_o norm: {ro[h, w].norm().item():.4f}')
+    return ro
 
 # Ray helpers
 def get_rays(H, W, focal, c2w, trans_origin=''):
@@ -494,7 +498,7 @@ def get_rays(H, W, focal, c2w, trans_origin=''):
     dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1)
     # Rotate ray directions from camera frame to the world frame
     # rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
-    rays_d = torch.sum(dirs.unsqueeze(dim=-2) * c2w[:3,:3], -1)  # use pytorch style
+    rays_d = torch.sum(dirs.unsqueeze(dim=-2) * c2w[:3,:3], -1)  # shape: [H, W, 3]
     
     # Translate camera frame's origin to the world frame. It is the origin of all rays.
     rays_o = c2w[:3,-1].expand(rays_d.shape)
@@ -503,10 +507,7 @@ def get_rays(H, W, focal, c2w, trans_origin=''):
             rays_o = translate_origin_adapative(rays_o, rays_d)
         else:
             scale = 30 if trans_origin == 'fixed' else float(trans_origin)
-            rays_o = translate_origin_fixed(rays_o, rays_d, scale=scale)
-        # print
-        for ix in range(20):
-            print(f'{ix}: {rays_o[ix].norm().item():.4f}')
+            rays_o = translate_origin_fixed(rays_o, rays_d, scale=scale, n_print=10)
     return rays_o, rays_d
 
 def ndc_rays(H, W, focal, near, rays_o, rays_d):
