@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 # from torch.utils.tensorboard import SummaryWriter
 from run_nerf_helpers_v2 import NeRF, NeRF_v2, sample_pdf, ndc_rays, get_rays, get_embedder
-from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights
+from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, BlenderDataset, get_novel_poses
@@ -19,7 +19,7 @@ DEBUG = False
 
 # set up logging directories -------
 from logger import Logger
-from utils import Timer, check_path, LossLine, PresetLRScheduler, strdict_to_dict, _weights_init_orthogonal
+from utils import Timer, LossLine, PresetLRScheduler, strdict_to_dict, _weights_init_orthogonal
 from option import args
 
 logger = Logger(args)
@@ -260,10 +260,19 @@ def create_nerf(args, near, far):
 
     # load pretrained checkpoint
     if args.pretrained_ckpt:
-        ckpt_path, ckpt = load_weights(model, args.pretrained_ckpt, 'network_fn_state_dict')
+        ckpt = torch.load(args.pretrained_ckpt)
+        if 'network_fn' in ckpt:
+            model = ckpt['network_fn']
+            if model_fine is not None:
+                assert 'network_fine' in ckpt
+                model_fine = ckpt['network_fine']
+            print(f'Use model arch saved in checkpoint: "{args.pretrained_ckpt}"')
+        
+        # load state_dict
+        load_weights_v2(model, ckpt, 'network_fn_state_dict')
         if model_fine is not None:
-            load_weights(model_fine, args.pretrained_ckpt, 'network_fine_state_dict')
-        print('Load pretrained ckpt successfully: "%s"' % ckpt_path)
+            load_weights_v2(model_fine, ckpt, 'network_fine_state_dict')
+        print(f'Load pretrained ckpt successfully: "{args.pretrained_ckpt}"')
         
         if args.resume:
             start = ckpt['global_step']

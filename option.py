@@ -1,6 +1,8 @@
 from random import choice
 from numpy.random import default_rng
 import configargparse
+from utils import check_path
+
 parser = configargparse.ArgumentParser()
 parser.add_argument('--config', is_config_file=True, 
                     help='config file path')
@@ -172,3 +174,5 @@ def check_n_pose(n_pose):
 
 args.n_pose_kd = check_n_pose(args.n_pose_kd)
 args.n_pose_video = check_n_pose(args.n_pose_video)
+args.pretrained_ckpt = check_path(args.pretrained_ckpt)
+args.teacher_ckpt = check_path(args.teacher_ckpt)

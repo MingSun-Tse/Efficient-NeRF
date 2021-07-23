@@ -596,3 +596,13 @@ def load_weights(model, ckpt_path, key):
         new_state_dict[k] = v
     model.load_state_dict(new_state_dict)
     return ckpt_path, ckpt
+
+def load_weights_v2(model, ckpt, key):
+    from collections import OrderedDict
+    state_dict = ckpt[key]
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        if 'module.' in k:
+            k = k[7:]
+        new_state_dict[k] = v
+    model.load_state_dict(new_state_dict)
