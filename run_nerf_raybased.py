@@ -1,4 +1,4 @@
-import os, sys, copy, numpy as np, time, random, json
+import os, sys, copy, numpy as np, time, random, json, math
 import imageio
 from tqdm import tqdm, trange
 import matplotlib.pyplot as plt
@@ -7,9 +7,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # from torch.utils.tensorboard import SummaryWriter
-from model.nerf_ray_based import NeRF, NeRF_v2, NeRF_v3
-from run_nerf_helpers_v2 import sample_pdf, ndc_rays, get_rays, get_embedder
-from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2, get_selected_coords
+from model.nerf_raybased import NeRF, NeRF_v2
+from model.enhance_cnn import EDSR
+from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder
+from run_nerf_raybased_helpers import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2, get_selected_coords
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, BlenderDataset, get_novel_poses
@@ -166,11 +167,18 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 rgb += [rgb_]
                 disp += [disp_]
             rgb, disp = torch.cat(rgb, dim=0), torch.cat(disp, dim=0)
+            
+            # enhance
+            if 'network_enhance' in render_kwargs:
+                model_enhance = render_kwargs['network_enhance']
+                rgb = model_enhance(rgb, h=H, w=W)
+
+            # reshape to image
             rgb, disp = rgb.view(H, W, -1), disp.view(H, W, -1)
         
         else: # original implementation
-            rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)
-        
+            rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)    
+
         rgbs.append(rgb)
         disps.append(disp)
 
@@ -218,17 +226,17 @@ def create_nerf(args, near, far):
                                                                     embeddirs_fn=embeddirs_fn,
                                                                     netchunk=args.netchunk)
     elif args.model_name in ['nerf_v2']:
-        model = NeRF_v2(args, near, far, device=device, print=netprint).to(device)
+        model = NeRF_v2(args, near, far, print=netprint).to(device)
+        grad_vars = list(model.parameters())
+        if args.enhance_cnn == 'EDSR':
+            assert args.select_pixel_mode == 'rand_patch'
+            model_enhance = EDSR().to(device)
+            grad_vars += list(model_enhance.parameters())
         if args.init == 'orth':
             act_func = 'relu' # needs changes if the model does not use ReLU as activation func
             model.apply(lambda m: _weights_init_orthogonal(m, act=act_func))
             print(f'Use orth init. Activation func: {act_func}')
-        grad_vars = list(model.parameters())
-    
-    elif args.model_name in ['nerf_v3']:
-        model = NeRF_v3(args, near, far, device=device, print=netprint).to(device)
-        grad_vars = list(model.parameters())
-    
+
     # in KD, there is a pretrained teacher
     if args.teacher_ckpt:
         teacher_fn = NeRF(D=8, W=256, input_ch=63, output_ch=4, skips=[4], input_ch_views=27, 
@@ -311,6 +319,10 @@ def create_nerf(args, near, far):
     if args.teacher_ckpt:
         render_kwargs_train['teacher_fn'] = teacher_fn
         render_kwargs_train['teacher_fine'] = teacher_fine
+    
+    if args.enhance_cnn:
+        render_kwargs_train['network_enhance'] = model_enhance
+        render_kwargs_test['network_enhance'] = model_enhance
 
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
 
@@ -644,6 +656,8 @@ def train():
     H, W, focal = hwf
     H, W = int(H), int(W)
     hwf = [H, W, focal]
+    k = math.sqrt(float(args.N_rand) / H / W)
+    patch_h, patch_w = int(H * k), int(W * k)
 
     train_images, train_poses = images[i_train], poses[i_train]
     test_poses, test_images = poses[i_test], images[i_test]
@@ -884,7 +898,7 @@ def train():
                 if 'rgb0' in extras:
                     loss += img2mse(extras['rgb0'], target_s)
 
-            elif args.model_name in ['nerf_v2', 'nerf_v3']:
+            elif args.model_name in ['nerf_v2']:
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
                 if args.directly_predict_rgb:
@@ -897,11 +911,19 @@ def train():
                     else:
                         rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
                 
-            # loss
+            # rgb loss
             loss_rgb = img2mse(rgb, target_s); loss_line.update('loss_rgb', loss_rgb.item(), '.4f')
             psnr = mse2psnr(loss_rgb); loss_line.update('psnr', psnr.item(), '.4f')
             loss += loss_rgb
-            
+
+            # enhance cnn rgb loss
+            if args.enhance_cnn:
+                model_enhance = render_kwargs_train['network_enhance']
+                rgb1 = model_enhance(rgb, h=patch_h, w=patch_w)
+                loss_rgb1 = img2mse(rgb1, target_s); loss_line.update('loss_rgb1', loss_rgb1.item(), '.4f')
+                psnr1 = mse2psnr(loss_rgb1); loss_line.update('psnr1', psnr1.item(), '.4f')
+                loss += loss_rgb1
+
             # backward and update
             t_forward = time.time() - t_
             t_ = time.time()
@@ -924,6 +946,12 @@ def train():
             logstr = f"[TRAIN] Iter {i} " + loss_line.format()
             print(logstr)
             # tqdm.write(logstr)
+
+            # save image for check
+            if i % 10 * args.i_print == 0:
+                img = rgb1.reshape([patch_h, patch_w, 3])
+                save_path = f'{logger.gen_img_path}/train_patch_{ExpID}_iter{i}.png'
+                imageio.imwrite(save_path, to8b(img))
 
         # test: using the splitted test images
         if i % args.i_testset == 0:
@@ -963,13 +991,13 @@ def train():
             path = os.path.join(logger.weights_path, '{:06d}.tar'.format(i))
             to_save = {
                 'global_step': global_step,
-                'network_fn': render_kwargs_train['network_fn'],
                 'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
             }
             if args.model_name in ['nerf'] and args.N_importance > 0:
-                to_save['network_fine'] = render_kwargs_train['network_fine']
                 to_save['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
+            if args.enhance_cnn:
+                to_save['network_enhance_state_dict'] = render_kwargs_train['network_enhance'].state_dict()
             torch.save(to_save, path)
             print(f'Iter {i} Save checkpoint: "{path}"')
 

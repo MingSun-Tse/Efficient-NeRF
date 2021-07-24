@@ -116,7 +116,7 @@ parser.add_argument('--debug', action="store_true")
 parser.add_argument('--screen_print', action="store_true")
 
 # @mst: related to nerf_v2
-parser.add_argument('--model_name', type=str, default='nerf_v2')
+parser.add_argument('--model_name', type=str, default='nerf_v2', choices=['nerf', 'nerf_v2'])
 parser.add_argument('--N_iters', type=int, default=200000)
 parser.add_argument('--skips', type=str, default='4')
 parser.add_argument('--D_head', type=int, default=4)
@@ -160,6 +160,7 @@ parser.add_argument('--init', type=str, default='default', choices=['default', '
 parser.add_argument('--teacher_targets_save_path', type=str, default='teacher_targets.npy')
 parser.add_argument('--trans_origin', type=str, default='')
 parser.add_argument('--select_pixel_mode', type=str, default='rand_pixel', choices=['rand_pixel', 'rand_patch'])
+parser.add_argument('--enhance_cnn', type=str, default='', choices=['', 'EDSR', 'RCAN'])
 args = parser.parse_args()
 
 if args.video_tag == '':

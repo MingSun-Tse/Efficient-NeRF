@@ -625,5 +625,5 @@ def get_selected_coords(coords, N_rand, mode):
         bbh2 = bbh1 + patch_h
         bbw2 = bbw1 + patch_w
         selected_coords = coords[bbh1:bbh2, bbw1:bbw2, :] # [patch_h, patch_w, 2]
-        selected_coords = selected_coords.view(-1, 2) # [patch_h*patch_w, 2]
+        selected_coords = selected_coords.reshape([-1, 2]) # [patch_h*patch_w, 2]
         return selected_coords, [bbh1, bbw1, bbh2, bbw2]

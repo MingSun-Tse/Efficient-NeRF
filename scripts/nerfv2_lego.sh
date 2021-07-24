@@ -39,7 +39,7 @@ CUDA_VISIBLE_DEVICES=2 python run_nerf_v2.py --config configs/lego.txt --n_sampl
 CUDA_VISIBLE_DEVICES=0 python run_nerf_v2.py --config configs/lego.txt --n_sample_per_ray 4 --netwidth 1024 --netdepth 32 --skips 8,16,24 --directly_predict_rgb --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v5_NPose100,25,1 --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 16384 --precrop_iters -1 --i_update_data 1000 --pseudo_ratio_schedule 0:0.2,200000:0.8 --screen --project nerfv2__lego__S4W1024D32Skip8,16,24_DPRGB_BS16384_KDMixDataV5
 
 # n_sample_per_ray = 1
-CUDA_VISIBLE_DEVICES=3 python run_nerf_v2.py --config configs/lego.txt --n_sample_per_ray 1 --netwidth 1024 --netdepth 8 --skips 2,4,6 --directly_predict_rgb --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v5_NPose100,25,1 --n_pose_video 50,4,1 --N_iters 600000 --N_rand 32768 --precrop_iters -1 --i_update_data 1000 --pseudo_ratio_schedule 0:0.2,200000:0.8 --screen --project nerfv2__lego__S1W1024D8Skip2,4,6_DPRGB_BS32768_KDMixDataV5 --debug --i_video 10 --i_print 10 --i_testset 20 --i_weights 30
+CUDA_VISIBLE_DEVICES=3 python run_nerf_v2.py --config configs/lego.txt --n_sample_per_ray 1 --netwidth 1024 --netdepth 8 --skips 2,4,6 --directly_predict_rgb --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v4_NPose50,20,10 --n_pose_video 20,4,3 --N_iters 600000 --N_rand 32768 --precrop_iters -1 --i_update_data 1000 --pseudo_ratio_schedule 0:0.2,200000:0.8 --screen --project nerfv2__lego__S1W1024D8Skip2,4,6_DPRGB_BS32768_KDMixDataV4
 
 
 # kd with new data ship

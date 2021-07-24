@@ -6,7 +6,7 @@ import json
 import torch.nn.functional as F
 import cv2
 from torch.utils.data import Dataset
-from run_nerf_helpers_v2 import to_tensor, to8b
+from run_nerf_raybased_helpers import to_tensor, to8b
 
 trans_t = lambda t : torch.Tensor([
     [1,0,0,0],

@@ -1,7 +1,7 @@
 import numpy as np
 import os, imageio
 from torch.utils.data import Dataset
-from run_nerf_helpers_v2 import to_tensor, to8b
+from run_nerf_raybased_helpers import to_tensor, to8b
 
 
 ########## Slightly modified version of LLFF data loading code 
