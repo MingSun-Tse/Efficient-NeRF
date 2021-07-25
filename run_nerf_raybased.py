@@ -948,7 +948,7 @@ def train():
             # tqdm.write(logstr)
 
             # save image for check
-            if i % 100 * args.i_print == 0:
+            if i % (100 * args.i_print) == 0:
                 img = rgb1.reshape([patch_h, patch_w, 3])
                 save_path = f'{logger.gen_img_path}/train_patch_{ExpID}_iter{i}.png'
                 imageio.imwrite(save_path, to8b(img))
