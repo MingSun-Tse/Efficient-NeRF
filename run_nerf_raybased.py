@@ -152,7 +152,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         W = W//render_factor
         focal = focal/render_factor
     
-    rgbs, disps = [], []
+    rgbs, disps, errors = [], [], []
     for i, c2w in enumerate(render_poses):
         if new_render_func: # our new rendering func
             model = render_kwargs['network_fn']
@@ -178,13 +178,18 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         
         else: # original implementation
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)    
-
+        
         rgbs.append(rgb)
         disps.append(disp)
+
+        if gt_imgs is not None:
+            errors += [(rgb-gt_imgs[i]).abs()]
 
         if savedir is not None:
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
             imageio.imwrite(filename, to8b(rgbs[-1]))
+            if len(errors):
+                imageio.imwrite(filename.replace('.png', '_error.png'), to8b(errors[-1]))
 
     rgbs = torch.stack(rgbs, dim=0)
     disps = torch.stack(disps, dim=0)
@@ -192,10 +197,11 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     if gt_imgs is not None:
         test_loss = img2mse(rgbs, gt_imgs)
         test_psnr = mse2psnr(test_loss)
+        errors = torch.stack(errors, dim=0)
     else:
-        test_loss, test_psnr = None, None
-
-    return rgbs, disps, test_loss, test_psnr
+        test_loss, test_psnr, errors = None, None, None
+        
+    return rgbs, disps, test_loss, test_psnr, errors
 
 def create_nerf(args, near, far):
     """Instantiate NeRF's MLP model.
@@ -253,9 +259,10 @@ def create_nerf(args, near, far):
             param.requires_grad = False
         
         # load weights
-        ckpt_path, ckpt = load_weights(teacher_fn, args.teacher_ckpt, 'network_fn_state_dict')
-        ckpt_path, ckpt = load_weights(teacher_fine, args.teacher_ckpt, 'network_fine_state_dict')
-        print(f'Load teacher ckpt successfully: "{ckpt_path}"')
+        ckpt = torch.load(args.teacher_ckpt)
+        load_weights_v2(teacher_fn, ckpt, 'network_fn_state_dict')
+        load_weights_v2(teacher_fine, ckpt, 'network_fine_state_dict')
+        print(f'Load teacher ckpt successfully: "{args.teacher_ckpt}"')
 
         # get network_query_fn
         embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
@@ -496,7 +503,7 @@ def render_rays(ray_batch,
 
     return ret
 
-def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
+def get_teacher_targets(poses, H, W, focal, render_kwargs_train, args):
     render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
     render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
     render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
@@ -518,13 +525,15 @@ def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
     print(f'Teacher rendering done ({len(poses)} views). Time: {(time.time() - t_):.2f}s')
     return teacher_target
 
-def get_teacher_target_v2(poses, H, W, focal, render_kwargs_train, args):
+def get_teacher_targets_v2(poses, H, W, focal, render_kwargs_train, args, pose_tag, check_img=False):
     '''Save teacher target as .npy
     '''
-    if os.path.exists(args.teacher_targets_save_path):
-        rgbs = np.load(args.teacher_targets_save_path)
+    teacher_expid, teacher_iter = parse_expid_iter(args.teacher_ckpt)
+    target_path = f'data/pose_targets_{teacher_expid}_iter{teacher_iter}_pose{pose_tag}.npy'
+    if os.path.exists(target_path):
+        rgbs = np.load(target_path)
         rgbs = to_tensor(rgbs)
-        print(f'Loaded saved teacher targets: "{args.teacher_targets_save_path}"')
+        print(f'Loaded saved teacher targets: "{target_path}"')
         return rgbs
     else:
         if args.debug:
@@ -537,13 +546,15 @@ def get_teacher_target_v2(poses, H, W, focal, render_kwargs_train, args):
         render_kwargs_.pop('teacher_fn')
         render_kwargs_.pop('teacher_fine')
         rgbs, *_ = render_path(poses, hwf, args.chunk, render_kwargs_, render_factor=args.render_factor, new_render_func=False)
-        # check pseudo images
-        savedir = f'{logger.gen_img_path}/teacher_targets_{ExpID}.npy'
-        if not os.path.exists(savedir):
-            os.makedirs(savedir)
-        for ix, rgb in enumerate(rgbs):
-            imageio.imwrite(f'{savedir}/{ix}.png', to8b(rgb))
-        np.save(args.teacher_targets_save_path, to_array(rgbs))
+        np.save(target_path, to_array(rgbs))
+
+        # check teacher images
+        if check_img:
+            savedir = target_path.replace('.npy', '')
+            if not os.path.exists(savedir):
+                os.makedirs(savedir)
+            for ix, rgb in enumerate(rgbs):
+                imageio.imwrite(f'{savedir}/{ix}.png', to8b(rgb))
         return rgbs
 
 def InfiniteSampler(n):
@@ -651,6 +662,30 @@ def train():
     else:
         print('Unknown dataset type', args.dataset_type, 'exiting')
         return
+    
+    # Create log dir and copy the config file
+    f = f'{logger.log_path}/args.txt'
+    with open(f, 'w') as file:
+        for arg in sorted(vars(args)):
+            attr = getattr(args, arg)
+            file.write('{} = {}\n'.format(arg, attr))
+    if args.config is not None:
+        f = f'{logger.log_path}/config.txt'
+        with open(f, 'w') as file:
+            file.write(open(args.config, 'r').read())
+
+    # Create nerf model
+    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args, near, far)
+    new_render_func = False
+    if args.model_name in ['nerf_v2']:
+        new_render_func = True
+
+    bds_dict = {
+        'near' : near,
+        'far' : far,
+    }
+    render_kwargs_train.update(bds_dict)
+    render_kwargs_test.update(bds_dict)
 
     # Cast intrinsics to right types
     H, W, focal = hwf
@@ -659,9 +694,14 @@ def train():
     k = math.sqrt(float(args.N_rand) / H / W)
     patch_h, patch_w = int(H * k), int(W * k)
 
+    # get train, test, video poses and images
     train_images, train_poses = images[i_train], poses[i_train]
     test_poses, test_images = poses[i_test], images[i_test]
     n_original_img = len(train_images)
+    if args.dataset_type == 'blender':
+        video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
+    else:
+        video_poses = render_poses
     # # ------------- check poses
     # netprint('=====> Test poses:')
     # for p in test_poses:
@@ -687,30 +727,6 @@ def train():
     print(f'{len(i_val)} val views are [{" ".join([str(x) for x in i_val])}]')
     print(f'train_images shape {train_images.shape} train_poses shape {train_images.shape}')
 
-    # Create log dir and copy the config file
-    f = f'{logger.log_path}/args.txt'
-    with open(f, 'w') as file:
-        for arg in sorted(vars(args)):
-            attr = getattr(args, arg)
-            file.write('{} = {}\n'.format(arg, attr))
-    if args.config is not None:
-        f = f'{logger.log_path}/config.txt'
-        with open(f, 'w') as file:
-            file.write(open(args.config, 'r').read())
-
-    # Create nerf model
-    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args, near, far)
-    new_render_func = False
-    if args.model_name in ['nerf_v2']:
-        new_render_func = True
-
-    bds_dict = {
-        'near' : near,
-        'far' : far,
-    }
-    render_kwargs_train.update(bds_dict)
-    render_kwargs_test.update(bds_dict)
-
     if args.test_teacher:
         assert args.teacher_ckpt
         print('Testing teacher...')
@@ -718,23 +734,48 @@ def train():
         render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
         render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
         with torch.no_grad():
-            *_, test_loss, test_psnr = render_path(test_poses, hwf, 4096, render_kwargs_, gt_imgs=test_images, render_factor=args.render_factor, new_render_func=False)
+            *_, test_loss, test_psnr, _ = render_path(test_poses, hwf, 4096, render_kwargs_, gt_imgs=test_images, render_factor=args.render_factor, new_render_func=False)
         print(f'Teacher test: Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
 
     if args.test_pretrained:
         print('Testing pretrained...')
         with torch.no_grad():
-            *_, test_loss, test_psnr = render_path(test_poses, hwf, 4096, render_kwargs_test, gt_imgs=test_images, render_factor=args.render_factor, new_render_func=new_render_func)
+            *_, test_loss, test_psnr,_  = render_path(test_poses, hwf, 4096, render_kwargs_test, gt_imgs=test_images, render_factor=args.render_factor, new_render_func=new_render_func)
         print(f'Pretrained test: Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
+
+    # @mst: use dataloader for training
+    kd_poses = None
+    if args.datadir_kd:
+        if args.dataset_type == 'blender':
+            pr = get_pseudo_ratio(args.pseudo_ratio_schedule, current_step=start+1)
+            trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
+        else: # LLFF dataset
+            kd_poses = copy.deepcopy(render_poses)
+            print(f'Using teacher to render {len(kd_poses)} images for KD...')
+            kd_targets = get_teacher_targets_v2(kd_poses, H, W, focal, render_kwargs_train, args, pose_tag=args.n_pose_kd)
+            n_total_img = len(kd_poses) + len(train_images)
+            pr = len(kd_poses) / n_total_img
+        print(f'Loaded data. Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f} ')
+
+    # get video_targets
+    video_targets = None
+    if args.teacher_ckpt:
+        t_ = time.time()
+        print('Get video targets...')
+        if kd_poses is not None and (video_poses - kd_poses).abs().sum() == 0:
+            video_targets = kd_targets
+        else:
+            video_targets = get_teacher_targets_v2(video_poses, H, W, focal, render_kwargs_train, args, pose_tag=args.n_pose_video)
+        print(f'Get video targets done (time: {time.time() - t_:.2f}s)')
 
     # Short circuit if only rendering out from trained model
     if args.render_only:
         print('RENDER ONLY')
-        exp_id, iter_ = parse_expid_iter(args.pretrained_ckpt)
+        expid, iter_ = parse_expid_iter(args.pretrained_ckpt)
         with torch.no_grad():
             if args.render_test:
                 print('Rendering test images...')
-                rgbs, *_, test_loss, test_psnr = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, savedir=logger.gen_img_path, render_factor=args.render_factor, new_render_func=new_render_func)
+                rgbs, *_, test_loss, test_psnr, errors = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, savedir=logger.gen_img_path, render_factor=args.render_factor, new_render_func=new_render_func)
                 print(f'[TEST] Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
             else:
                 if args.dataset_type == 'blender':
@@ -742,9 +783,11 @@ def train():
                 else:
                     video_poses = render_poses
                 print(f'Rendering video... (n_pose: {len(video_poses)})')
-                rgbs, *_ = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=None, savedir=logger.gen_img_path, render_factor=args.render_factor, new_render_func=new_render_func)
-        video_path = f'{logger.gen_img_path}/video_{exp_id}_iter{iter_}_{args.video_tag}.mp4'
+                rgbs, *_, errors = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=video_targets, savedir=logger.gen_img_path, render_factor=args.render_factor, new_render_func=new_render_func)
+        video_path = f'{logger.gen_img_path}/video_{expid}_iter{iter_}_{args.video_tag}.mp4'
         imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
+        if errors is not None:
+            imageio.mimwrite(video_path.replace('.mp4', '_error.mp4'), to8b(errors), fps=30, quality=8)
         print(f'Save video: "{video_path}"')
         exit()
 
@@ -773,20 +816,6 @@ def train():
     # @mst: use our own lr scheduler
     if args.lr:
         lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
-                    
-    # @mst: use dataloader for training
-    if args.datadir_kd:
-        if args.dataset_type == 'blender':
-            pr = get_pseudo_ratio(args.pseudo_ratio_schedule, current_step=start+1)
-            trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
-            kd_poses = None
-        else: # LLFF dataset
-            kd_poses = copy.deepcopy(render_poses)
-            print(f'Using teacher to render {len(kd_poses)} images for KD...')
-            kd_targets = get_teacher_target_v2(kd_poses, H, W, focal, render_kwargs_train, args)
-            n_total_img = len(kd_poses) + len(train_images)
-            pr = len(kd_poses) / n_total_img
-        print(f'Loaded data. Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f} ')
 
     # training
     timer = Timer((args.N_iters - start) // args.i_testset)
@@ -960,7 +989,7 @@ def train():
             with torch.no_grad():
                 print(f'Iter {i} Testing...')
                 t_ = time.time()
-                *_, test_loss, test_psnr = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, 
+                *_, test_loss, test_psnr, errors = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, 
                     savedir=testsavedir, render_factor=args.render_factor, new_render_func=new_render_func)
                 t_test = time.time() - t_
             accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} Train_HistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s')
@@ -969,22 +998,18 @@ def train():
 
         # test: using novel poses
         if i % args.i_video == 0:
-            if args.dataset_type == 'blender':
-                video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
-            else:
-                video_poses = render_poses
             with torch.no_grad():
                 print(f'Iter {i} Rendering video... (n_pose: {len(video_poses)})')
                 t_ = time.time()
-                gt_imgs = kd_targets if args.datadir_kd and kd_poses is not None and (video_poses-kd_poses).abs().sum() == 0 else None
-                rgbs, disps, *_, video_loss, video_psnr = render_path(video_poses, hwf, args.chunk, render_kwargs_test, 
-                        gt_imgs=gt_imgs,render_factor=args.render_factor, new_render_func=new_render_func)
+                rgbs, disps, *_, video_loss, video_psnr, errors = render_path(video_poses, hwf, args.chunk, render_kwargs_test, 
+                        gt_imgs=video_targets, render_factor=args.render_factor, new_render_func=new_render_func)
             video_path = f'{logger.gen_img_path}/video_{ExpID}_iter{i}_{args.video_tag}.mp4'
             imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
             # imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
             print(f'[VIDEO] Rendering done. Time {(time.time() - t_):.2f}s. Save video: "{video_path}"')
             if video_psnr is not None:
                 print(f'[VIDEO] video_loss {video_loss.item():.4f} video_psnr {video_psnr.item():.4f}')
+                imageio.mimwrite(video_path.replace('.mp4', '_error.mp4'), to8b(errors), fps=30, quality=8)
 
         # save checkpoint
         if i % args.i_weights == 0:
