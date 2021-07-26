@@ -951,8 +951,9 @@ def train():
                         rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
                 
             # rgb loss
-            loss_rgb = img2mse(rgb, target_s); loss_line.update('loss_rgb', loss_rgb.item(), '.4f')
-            psnr = mse2psnr(loss_rgb); loss_line.update('psnr', psnr.item(), '.4f')
+            loss_rgb = img2mse(rgb, target_s)
+            psnr = mse2psnr(loss_rgb)
+            loss_line.update('psnr', psnr.item(), '.4f')
             if not (args.enhance_cnn and args.freeze_pretrained):
                 loss += loss_rgb
 
@@ -960,12 +961,14 @@ def train():
             if args.enhance_cnn:
                 model_enhance = render_kwargs_train['network_enhance']
                 rgb1 = model_enhance(rgb, h=patch_h, w=patch_w)
-                loss_rgb1 = img2mse(rgb1, target_s); loss_line.update('loss_rgb1', loss_rgb1.item(), '.4f')
-                psnr1 = mse2psnr(loss_rgb1); loss_line.update('psnr1', psnr1.item(), '.4f')
+                loss_rgb1 = img2mse(rgb1, target_s)
+                psnr1 = mse2psnr(loss_rgb1)
+                loss_line.update('psnr1', psnr1.item(), '.4f')
                 loss += loss_rgb1
-
-            # backward and update
+            
             t_forward = time.time() - t_
+            
+            # backward and update
             t_ = time.time()
             optimizer.zero_grad()
             loss.backward()
@@ -973,8 +976,9 @@ def train():
             t_param_update = time.time() - t_
 
             # smoothing for log print
-            hist_psnr = psnr.item() if i == start + 1 else hist_psnr * 0.95 + psnr.item() * 0.05
-            loss_line.update('hist_psnr', hist_psnr, '.4f')
+            if not math.isinf(psnr.item()):
+                hist_psnr = psnr.item() if i == start + 1 else hist_psnr * 0.95 + psnr.item() * 0.05
+                loss_line.update('hist_psnr', hist_psnr, '.4f')
             if args.enhance_cnn:
                 hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
                 loss_line.update('hist_psnr1', hist_psnr1, '.4f')

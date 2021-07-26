@@ -75,12 +75,12 @@ class EDSR(nn.Module):
         x = x.permute(2, 0, 1) # [3, patch_h, patch_w]
         x = x.unsqueeze(0)
 
-        x = self.sub_mean(x)
+        # x = self.sub_mean(x)
         x = self.head(x)
         res = self.body(x)
         res += x
         x = self.tail(res)
-        x = self.add_mean(x)
+        # x = self.add_mean(x)
 
         x = x[0]
         x = x.permute(1, 2, 0)
