@@ -829,7 +829,7 @@ def train():
 
     # training
     timer = Timer((args.N_iters - start) // args.i_testset)
-    hist_loss, hist_psnr, hist_psnr1, n_pseudo_img, n_seen_img = 0, 0, 0, 0, 0
+    hist_psnr, hist_psnr1, n_pseudo_img, n_seen_img = 0, 0, 0, 0
     global global_step
     print('Begin training')
     for i in trange(start+1, args.N_iters+1):
@@ -953,7 +953,8 @@ def train():
             # rgb loss
             loss_rgb = img2mse(rgb, target_s); loss_line.update('loss_rgb', loss_rgb.item(), '.4f')
             psnr = mse2psnr(loss_rgb); loss_line.update('psnr', psnr.item(), '.4f')
-            loss += loss_rgb
+            if not (args.enhance_cnn and args.freeze_pretrained):
+                loss += loss_rgb
 
             # enhance cnn rgb loss
             if args.enhance_cnn:
@@ -972,12 +973,10 @@ def train():
             t_param_update = time.time() - t_
 
             # smoothing for log print
-            hist_loss = hist_loss * 0.95 + loss.item() * 0.05
-            hist_psnr = hist_psnr * 0.95 + psnr.item() * 0.05
-            loss_line.update('hist_loss', hist_loss, '.4f')
+            hist_psnr = psnr.item() if i == start + 1 else hist_psnr * 0.95 + psnr.item() * 0.05
             loss_line.update('hist_psnr', hist_psnr, '.4f')
             if args.enhance_cnn:
-                hist_psnr1 = hist_psnr1 * 0.95 + psnr1.item() * 0.05
+                hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
                 loss_line.update('hist_psnr1', hist_psnr1, '.4f')
 
         # print logs of training
