@@ -161,6 +161,7 @@ parser.add_argument('--teacher_targets_save_path', type=str, default='teacher_ta
 parser.add_argument('--trans_origin', type=str, default='')
 parser.add_argument('--select_pixel_mode', type=str, default='rand_pixel', choices=['rand_pixel', 'rand_patch'])
 parser.add_argument('--enhance_cnn', type=str, default='', choices=['', 'EDSR', 'RCAN'])
+parser.add_argument('--freeze_pretrained', action='store_true')
 args = parser.parse_args()
 
 if args.video_tag == '':

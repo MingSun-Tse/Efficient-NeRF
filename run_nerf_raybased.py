@@ -208,6 +208,7 @@ def create_nerf(args, near, far):
     """
     # set up model
     model_fine = network_query_fn = None
+    grad_vars = []
     if args.model_name in ['nerf']:
         embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
         input_ch_views = 0
@@ -219,7 +220,7 @@ def create_nerf(args, near, far):
         model = NeRF(D=args.netdepth, W=args.netwidth,
                     input_ch=input_ch, output_ch=output_ch, skips=skips,
                     input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
-        grad_vars = list(model.parameters())
+        grad_vars += list(model.parameters())
 
         if args.N_importance > 0:
             model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
@@ -233,11 +234,20 @@ def create_nerf(args, near, far):
                                                                     netchunk=args.netchunk)
     elif args.model_name in ['nerf_v2']:
         model = NeRF_v2(args, near, far, print=netprint).to(device)
-        grad_vars = list(model.parameters())
+        if args.freeze_pretrained:
+            assert args.pretrained_ckpt
+            model.eval()
+            for param in model.parameters():
+                param.requires_grad = False
+            print(f'Freeze model!')
+        else:
+            grad_vars += list(model.parameters())
+        
         if args.enhance_cnn == 'EDSR':
             assert args.select_pixel_mode == 'rand_patch'
             model_enhance = EDSR().to(device)
             grad_vars += list(model_enhance.parameters())
+        
         if args.init == 'orth':
             act_func = 'relu' # needs changes if the model does not use ReLU as activation func
             model.apply(lambda m: _weights_init_orthogonal(m, act=act_func))
@@ -819,7 +829,7 @@ def train():
 
     # training
     timer = Timer((args.N_iters - start) // args.i_testset)
-    hist_loss, hist_psnr, n_pseudo_img, n_seen_img = 0, 0, 0, 0
+    hist_loss, hist_psnr, hist_psnr1, n_pseudo_img, n_seen_img = 0, 0, 0, 0, 0
     global global_step
     print('Begin training')
     for i in trange(start+1, args.N_iters+1):
@@ -966,6 +976,9 @@ def train():
             hist_psnr = hist_psnr * 0.95 + psnr.item() * 0.05
             loss_line.update('hist_loss', hist_loss, '.4f')
             loss_line.update('hist_psnr', hist_psnr, '.4f')
+            if args.enhance_cnn:
+                hist_psnr1 = hist_psnr1 * 0.95 + psnr1.item() * 0.05
+                loss_line.update('hist_psnr1', hist_psnr1, '.4f')
 
         # print logs of training
         if i % args.i_print == 0:
