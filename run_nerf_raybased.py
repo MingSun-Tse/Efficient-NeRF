@@ -146,11 +146,11 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
 
 def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0, new_render_func=False):
     H, W, focal = hwf
-    if render_factor!=0:
+    if render_factor != 0:
         # Render downsampled for speed
-        H = H//render_factor
-        W = W//render_factor
-        focal = focal/render_factor
+        H = int(H / render_factor)
+        W = int(W / render_factor)
+        focal = focal / render_factor
     
     rgbs, disps, errors = [], [], []
     for i, c2w in enumerate(render_poses):
@@ -548,7 +548,7 @@ def get_teacher_targets_v2(poses, H, W, focal, render_kwargs_train, args, pose_t
     else:
         if args.debug:
             factor = args.render_factor if args.render_factor != 0 else 1
-            return torch.randn([poses.shape[0], H//factor, W//factor, 3]).to(device)
+            return torch.randn([poses.shape[0], int(H/factor), int(W/factor), 3]).to(device)
         hwf = [H, W, focal]
         render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
         render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn

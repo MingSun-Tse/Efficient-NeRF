@@ -61,7 +61,7 @@ parser.add_argument("--render_only", action='store_true',
                     help='do not optimize, reload weights and render out render_poses path')
 parser.add_argument("--render_test", action='store_true', 
                     help='render the test set instead of render_poses path')
-parser.add_argument("--render_factor", type=int, default=0, 
+parser.add_argument("--render_factor", type=float, default=0, 
                     help='downsampling factor to speed up rendering, set 4 or 8 for fast preview')
 
 # training options
@@ -153,6 +153,7 @@ parser.add_argument('--video_poses_perturb', action="store_true")
 parser.add_argument('--kd_poses_update', type=str, default='once')
 parser.add_argument('--datadir_kd', type=str, default='')
 parser.add_argument('--create_data_chunk', type=int, default=100)
+parser.add_argument('--create_data', type=str, default='spiral_evenly_spaced')
 parser.add_argument('--i_update_data', type=int, default=500,
         help='interval of updating training data (changing pseudo data)')
 parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0.9')
