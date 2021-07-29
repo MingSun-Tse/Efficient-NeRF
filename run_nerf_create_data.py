@@ -19,6 +19,7 @@ DEBUG = False
 
 # set up logging directories -------
 from logger import Logger
+from utils import Timer
 from option import args
 
 logger = Logger(args)
@@ -613,8 +614,9 @@ def train():
         render_kwargs_.pop('teacher_fine')
 
         # run
-        i_save = 100
-        data, t0, section = [], time.time(), 0
+        i_save, split_size = 10, 4096 # every 4096 rays will make up a .npy file
+        data, t0, split = [], time.time(), 0
+        timer = Timer(args.n_pose_kd)
         for i in range(1, args.n_pose_kd+1):
             pose = get_rand_pose()
             focal_ = focal * (np.random.rand() + 1) # scale focal by [1, 2)
@@ -626,7 +628,8 @@ def train():
             data_ = torch.cat([rays_o, rays_d, rgb], dim=-1) # [H, W, 9]
             data += [data_.view(-1, 9)]
             print(f'[{i}/{args.n_pose_kd}] Using teacher to render more images... elapsed time: {(time.time() - t0):.2f}s')
-            
+            print(f'Predicted finish time: {timer()}')
+
             # check pseudo images
             if i <= 5:
                 filename = f'{datadir_kd_new}/pseudo_sample_{i}.png'
@@ -634,17 +637,21 @@ def train():
 
             # save to avoid out of memory
             if i % i_save == 0:
-                section += 1
-                save_path = f'{datadir_kd_new}/data_{section}.npy'
                 data = torch.cat(data, dim=0)
                 
-                # shuffle
-                rand_ix = np.random.permutation(data.shape[0])
-                data = data[rand_ix] 
-                
+                # shuffle rays
+                rand_ix1 = np.random.permutation(data.shape[0])
+                rand_ix2 = np.random.permutation(data.shape[0])
+                data = data[rand_ix1][rand_ix2]
                 data = to_array(data)
-                np.save(save_path, data)
-                print(f'[{i}/{args.n_pose_kd}] Saved data at "{save_path}"')
+
+                # save
+                for ix in range(0, data.shape[0], split_size):
+                    split += 1
+                    save_path = f'{datadir_kd_new}/data_{split}.npy'
+                    d = data[ix: ix+split_size]
+                    np.save(save_path, d)
+                print(f'[{i}/{args.n_pose_kd}] Saved data at "{datadir_kd_new}"')
                 data = [] # reset
     
 if __name__=='__main__':
