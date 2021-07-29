@@ -140,12 +140,9 @@ def setup_blender_datadir_v2(datadir_old, datadir_new, half_res=False, white_bkg
         rgb = rgb[..., :3] * rgb[..., -1:] + (1. - rgb[..., -1:]) if white_bkgd else rgb[..., :3] 
         np.save(f"{datadir_new}/train/{img.replace('.png', '.npy')}", rgb)
 
-def setup_blender_datadir_rand(datadir_old, datadir_new, half_res=False, white_bkgd=True):
-    pass
-
 def save_blender_data(datadir, poses, images, split='train'):
     '''Save pseudo data created by a trained nerf.'''
-    import json, imageio, os
+    import json, os
     json_file = '%s/transforms_%s.json' % (datadir, split)
     with open(json_file) as f:
         data = json.load(f)
@@ -254,10 +251,14 @@ def get_novel_poses_v2(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
     novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
     return novel_poses
 
-def get_novel_rays(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
+def get_rand_pose():
     '''Random sampling. Random origins and directions.
     '''
-    pass
+    theta1=-180; theta2=180; phi1=-90; phi2=0
+    theta = theta1 + np.random.rand() * (theta2 - theta1)
+    phi = phi1 + np.random.rand() * (phi2 - phi1)
+    return to_tensor(pose_spherical(theta, phi, 4))
+    
 
 
 

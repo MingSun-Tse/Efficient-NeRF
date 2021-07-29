@@ -1,23 +1,17 @@
 import os, sys
 import numpy as np
-import imageio
-import json
-import random
+import imageio, shutil
 import time
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-# from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm, trange
 
-import matplotlib.pyplot as plt
 from run_nerf_raybased_helpers import NeRF, sample_pdf, ndc_rays, get_rays, get_embedder
 from run_nerf_raybased_helpers import to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data, setup_blender_datadir_v2 as setup_blender_datadir, save_blender_data, get_novel_poses, get_novel_rays
-from load_blender import setup_blender_datadir_rand
+from load_blender import load_blender_data, setup_blender_datadir_v2 as setup_blender_datadir, save_blender_data, get_novel_poses
+from load_blender import get_rand_pose
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
@@ -36,6 +30,7 @@ ExpID = logger.ExpID
 
 # redefine get_rays
 from functools import partial
+get_rays1 = get_rays
 get_rays = partial(get_rays, trans_origin=args.trans_origin, focal_scale=args.focal_scale)
 
 def batchify(fn, chunk):
@@ -534,7 +529,6 @@ def train():
 
     train_images, train_poses = images[i_train], poses[i_train]
     test_poses, test_images = poses[i_test], images[i_test]
-    n_original_img = len(train_images)
 
     # data sketch
     print(f'{len(i_train)} original train views are [{" ".join([str(x) for x in i_train])}]')
@@ -603,37 +597,55 @@ def train():
     
     elif args.create_data in ['rand']:
         # set up data directory
-        setup_blender_datadir_rand(datadir_kd_old, datadir_kd_new, args.half_res, args.white_bkgd)
+        if os.path.exists(datadir_kd_new):
+            if os.path.isfile(datadir_kd_new): 
+                os.remove(datadir_kd_new)
+            else:
+                shutil.rmtree(datadir_kd_new)
+        os.makedirs(datadir_kd_new)
         print('Set up new data directory, done!')
+        
+        # set up model
+        render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
+        render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
+        render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
+        render_kwargs_.pop('teacher_fn')
+        render_kwargs_.pop('teacher_fine')
 
-        # get poses of psuedo data
-        kd_rays = get_novel_rays(args, n_pose=args.n_pose_kd).to(device)
-        rand_ix = np.random.permutation(kd_rays)
-        kd_rays = kd_rays[rand_ix] # shuffle
-        rays_path = f'{datadir_kd_new}/rays.npy'
-        np.save(rays_path, kd_rays)
+        # run
+        i_save = 100
+        data, t0, section = [], time.time(), 0
+        for i in range(1, args.n_pose_kd+1):
+            pose = get_rand_pose()
+            focal = focal * (np.random.rand() + 1) # scale focal by [1, 2)
+            rays_o, rays_d = get_rays1(H, W, focal, pose) # rays_o, rays_d shape: [H, W, 3]
+            batch_rays = torch.stack([rays_o, rays_d], 0)
+            rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
+                                            verbose=False, retraw=False,
+                                            **render_kwargs_)
+            data_ = torch.cat([rays_o, rays_d, rgb], dim=-1) # [H, W, 9]
+            data += [data_.view(-1, 9)]
+            print(f'[{i}/{args.n_pose_kd}] Using teacher to render more images... elapsed time: {(time.time() - t0):.2f}s')
+            
+            # check pseudo images
+            if i <= 5:
+                filename = f'{datadir_kd_new}/pseudo_sample_{i}.png'
+                imageio.imwrite(filename, to8b(rgb))
 
-        rgbs_path = f'{datadir_kd_new}/rgbs.npy'
-        n_ray = 0
-        for i in range(0, len(kd_rays), chunk):
-            # load existing rgbs
-            t_ = time.time()
-            npy = np.load(rgbs_path) if os.path.exists(rgbs_path) else np.array([])
-            t_load = time.time() - t_
-            
-            # get more rgbs
-            t_ = time.time()
-            rays = kd_rays[i: i+chunk]
-            rgbs = get_teacher_target_for_rays(rays, render_kwargs_train)
-            rgbs = to_array(rgbs)
-            t_create = time.time() - t_
-            
-            # save
-            rgbs = np.concatenate([npy, rgbs])
-            np.save(rgbs_path, rgbs)
-            n_ray += rays.shape[0]
-            print(f'Create new data (load time: {t_load:.2f}s. create time: {t_create:.2f}s). Save to "{rgbs_path}". Now total #rays: {n_ray}')
-    # ---
+            # save to avoid out of memory
+            if i % i_save == 0:
+                section += 1
+                save_path = f'{datadir_kd_new}/data_{section}.npy'
+                data = torch.cat(data, dim=0)
+                
+                # shuffle
+                rand_ix = np.random.permutation(data.shape[0])
+                data = data[rand_ix] 
+                
+                data = to_array(data)
+                np.save(save_path, data)
+                print(f'[{i}/{args.n_pose_kd}] Saved data at "{save_path}"')
+                data = [] # reset
     
 if __name__=='__main__':
     train()

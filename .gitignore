@@ -1,3 +1,4 @@
+run_nerf_v2.py
 *.pyc
 .script_history
 Debug_Dir
