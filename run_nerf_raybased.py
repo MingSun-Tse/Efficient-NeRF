@@ -911,6 +911,13 @@ def train():
                     
                     n_seen_img += 1
                     loss_line.update('pseudo_img_ratio', n_pseudo_img/ n_seen_img, '.4f')
+                
+                elif args.data_mode in ['rays']:
+                    if i % args.i_update_data == 0: # update trainloader, possibly load more data
+                        if args.dataset_type == 'blender':
+                            t_ = time.time()
+                            trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
+                            print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {n_total_img}')
             
             # get rays (rays_o, rays_d, target_s)
             if N_rand is not None:
