@@ -163,6 +163,7 @@ parser.add_argument('--trans_origin', type=str, default='')
 parser.add_argument('--select_pixel_mode', type=str, default='rand_pixel', choices=['rand_pixel', 'rand_patch'])
 parser.add_argument('--enhance_cnn', type=str, default='', choices=['', 'EDSR', 'RCAN'])
 parser.add_argument('--freeze_pretrained', action='store_true')
+parser.add_argument('--focal_scale', type=float, default=1.)
 args = parser.parse_args()
 
 if args.video_tag == '':

@@ -491,8 +491,8 @@ def translate_origin_fixed(rays_o, rays_d, scale, n_print=0):
     return ro
 
 # Ray helpers
-def get_rays(H, W, focal, c2w, trans_origin=''):
-    focal *= 0.5
+def get_rays(H, W, focal, c2w, trans_origin='', focal_scale=1):
+    focal *= focal_scale
     i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H)) # pytorch's meshgrid has indexing='ij'
     i = i.t().to(device)
     j = j.t().to(device)

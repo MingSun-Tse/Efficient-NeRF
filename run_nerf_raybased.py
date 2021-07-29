@@ -32,7 +32,7 @@ ExpID = logger.ExpID
 
 # redefine get_rays
 from functools import partial
-get_rays = partial(get_rays, trans_origin=args.trans_origin)
+get_rays = partial(get_rays, trans_origin=args.trans_origin, focal_scale=args.focal_scale)
 # ---------------------------------
 
 def batchify(fn, chunk):

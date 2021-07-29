@@ -140,6 +140,9 @@ def setup_blender_datadir_v2(datadir_old, datadir_new, half_res=False, white_bkg
         rgb = rgb[..., :3] * rgb[..., -1:] + (1. - rgb[..., -1:]) if white_bkgd else rgb[..., :3] 
         np.save(f"{datadir_new}/train/{img.replace('.png', '.npy')}", rgb)
 
+def setup_blender_datadir_rand(datadir_old, datadir_new, half_res=False, white_bkgd=True):
+    pass
+
 def save_blender_data(datadir, poses, images, split='train'):
     '''Save pseudo data created by a trained nerf.'''
     import json, imageio, os
@@ -220,41 +223,41 @@ class BlenderDataset(Dataset):
 def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
     '''Even-spaced sampling
     '''
-    if args.dataset_type == 'blender':
-        near, far = 2, 6
-        if isinstance(n_pose, int):
-            thetas = np.linspace(theta1, theta2, n_pose+1)[:-1]
-            phis = [-30]
-            radiuses = [4]
-        else: # n_pose is a list
-            if ':' not in n_pose[0]:
-                n_pose = [int(x) for x in n_pose]
-                thetas = np.linspace(theta1, theta2, n_pose[0]+1)[:-1]
-                phis = np.linspace(phi1, phi2, n_pose[1]+2)[1: -1]
-                radiuses = np.linspace(near, far, n_pose[2]+2)[1: -1]
-            else:
-                mode, value = n_pose[0].split(':')
-                thetas = np.linspace(theta1, theta2, int(value)+1)[:-1] if mode == 'sample' else [float(value)]
-                mode, value = n_pose[1].split(':')
-                phis = np.linspace(phi1, phi2, int(value)+2)[1:-1] if mode == 'sample' else [float(value)]
-                mode, value = n_pose[2].split(':')
-                radiuses = np.linspace(near, far, int(value)+2)[1:-1] if mode == 'sample' else [float(value)]
-        novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
-    
-    elif args.dataset_type == 'llff':
-        pass
-
+    near, far = 2, 6
+    if isinstance(n_pose, int):
+        thetas = np.linspace(theta1, theta2, n_pose+1)[:-1]
+        phis = [-30]
+        radiuses = [4]
+    else: # n_pose is a list
+        if ':' not in n_pose[0]:
+            n_pose = [int(x) for x in n_pose]
+            thetas = np.linspace(theta1, theta2, n_pose[0]+1)[:-1]
+            phis = np.linspace(phi1, phi2, n_pose[1]+2)[1: -1]
+            radiuses = np.linspace(near, far, n_pose[2]+2)[1: -1]
+        else:
+            mode, value = n_pose[0].split(':')
+            thetas = np.linspace(theta1, theta2, int(value)+1)[:-1] if mode == 'sample' else [float(value)]
+            mode, value = n_pose[1].split(':')
+            phis = np.linspace(phi1, phi2, int(value)+2)[1:-1] if mode == 'sample' else [float(value)]
+            mode, value = n_pose[2].split(':')
+            radiuses = np.linspace(near, far, int(value)+2)[1:-1] if mode == 'sample' else [float(value)]
+    novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
     return to_tensor(novel_poses)
 
 def get_novel_poses_v2(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
-    '''Random sampling
+    '''Random sampling. Deprecated since radius should be fixed at 4.
     '''
-    assert args.dataset_type in ['blender']
-    if args.dataset_type == 'blender':
-        near, far = 2, 6
-        thetas = theta1 + np.random.rand(n_pose[0]) * (theta2 - theta1)
-        phis = phi1 + np.random.rand(n_pose[1]) * (phi2 - phi1)
-        radiuses = near + np.random.rand(n_pose[2]) * (far - near)
-        novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
+    near, far = 2, 6
+    thetas = theta1 + np.random.rand(n_pose[0]) * (theta2 - theta1)
+    phis = phi1 + np.random.rand(n_pose[1]) * (phi2 - phi1)
+    radiuses = near + np.random.rand(n_pose[2]) * (far - near)
+    novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
     return novel_poses
+
+def get_novel_rays(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
+    '''Random sampling. Random origins and directions.
+    '''
+    pass
+
+
 

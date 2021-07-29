@@ -11,17 +11,32 @@ import torch.nn.functional as F
 from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
-from run_nerf_helpers_v2 import NeRF, NeRF_v2, sample_pdf, ndc_rays, get_rays, get_embedder
-from run_nerf_helpers_v2 import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights
+from run_nerf_raybased_helpers import NeRF, sample_pdf, ndc_rays, get_rays, get_embedder
+from run_nerf_raybased_helpers import to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data, setup_blender_datadir_v2 as setup_blender_datadir, save_blender_data, get_novel_poses
-import copy
+from load_blender import load_blender_data, setup_blender_datadir_v2 as setup_blender_datadir, save_blender_data, get_novel_poses, get_novel_rays
+from load_blender import setup_blender_datadir_rand
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
 DEBUG = False
+
+# set up logging directories -------
+from logger import Logger
+from option import args
+
+logger = Logger(args)
+print = logger.log_printer.logprint
+accprint = logger.log_printer.accprint
+netprint = logger.log_printer.netprint
+ExpID = logger.ExpID
+# ---------------------------------
+
+# redefine get_rays
+from functools import partial
+get_rays = partial(get_rays, trans_origin=args.trans_origin, focal_scale=args.focal_scale)
 
 def batchify(fn, chunk):
     """Constructs a version of 'fn' that applies to smaller batches.
@@ -414,7 +429,7 @@ def render_rays(ray_batch,
 
     return ret
 
-def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
+def get_teacher_target(poses, H, W, focal, render_kwargs_train, args, n_pseudo_img):
     render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
     render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
     render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
@@ -430,23 +445,26 @@ def get_teacher_target(poses, H, W, focal, render_kwargs_train, args):
                                         verbose=False, retraw=False,
                                         **render_kwargs_)
         teacher_target.append(rgb)
-        # # check pseudo images
-        # filename = f'kd_fern_{ix}.png'
-        # imageio.imwrite(filename, to8b(rgb.data.cpu().numpy()))
+        n_pseudo_img[0] += 1
+        
+        # check pseudo images
+        if n_pseudo_img[0] <= 5:
+            filename = f'{args.datadir_kd_new}/pseudo_sample_{n_pseudo_img[0]}.png'
+            imageio.imwrite(filename, to8b(rgb))
     print(f'Teacher rendering done ({len(poses)} views). Time: {(time.time() - t_):.2f}s')
     return teacher_target
 
-# set up logging directories -------
-from logger import Logger
-from utils import Timer, LossLine, PresetLRScheduler, strdict_to_dict
-from option import args
-
-logger = Logger(args)
-print = logger.log_printer.logprint
-accprint = logger.log_printer.accprint
-netprint = logger.log_printer.netprint
-ExpID = logger.ExpID
-# ---------------------------------
+def get_teacher_target_for_rays(rays, render_kwargs_train):
+    '''Directly get outputs for rays'''
+    render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
+    render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
+    render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
+    render_kwargs_.pop('teacher_fn')
+    render_kwargs_.pop('teacher_fine')
+    H, W, focal = [0] * 3 # placeholder
+    rgbs, *_ = render(H, W, focal, rays=rays, verbose=False, retraw=False, **render_kwargs_)
+    print(f'rgbs.shape: {rgbs.shape}')
+    return rgbs
 
 def train():
     # Load data
@@ -536,7 +554,7 @@ def train():
             file.write(open(args.config, 'r').read())
 
     # Create nerf model
-    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args, near, far)
+    render_kwargs_train, render_kwargs_test, *_ = create_nerf(args, near, far)
 
     bds_dict = {
         'near' : near,
@@ -557,26 +575,64 @@ def train():
 
     # --- generate new data using trained NeRF
     datadir_kd_old, datadir_kd_new = args.datadir_kd.split(':')
-    setup_blender_datadir(datadir_kd_old, datadir_kd_new, args.half_res, args.white_bkgd)
-    print('Set up new data directory, done!')
-
-    # get poses of psuedo data
-    kd_poses = get_novel_poses(args, n_pose=args.n_pose_kd).to(device)
-    n_new_pose = len(kd_poses)
-    rand_ix = np.random.permutation(n_new_pose)
-    kd_poses = kd_poses[rand_ix] # shuffle
-    print(f'Get new poses, done! Total num of new poses: {n_new_pose}')
 
     # render pseduo data
     chunk = args.create_data_chunk
-    n_img = len(train_images)
-    for i in range(0, n_new_pose, chunk):
-        poses = kd_poses[i: i+chunk]
-        n_img += len(poses)
-        teacher_target = get_teacher_target(poses, H, W, focal, render_kwargs_train, args)
-        if args.dataset_type == 'blender':
-            save_blender_data(datadir_kd_new, poses, teacher_target)
-        print(f'Create new data. Save to "{datadir_kd_new}". Now total #train samples: {n_img}')
+    if args.create_data in ['spiral_evenly_spaced']:
+        # set up data directory
+        setup_blender_datadir(datadir_kd_old, datadir_kd_new, args.half_res, args.white_bkgd)
+        print('Set up new data directory, done!')
+
+        # get poses of psuedo data
+        kd_poses = get_novel_poses(args, n_pose=args.n_pose_kd).to(device)
+        n_new_pose = len(kd_poses)
+        rand_ix = np.random.permutation(n_new_pose)
+        kd_poses = kd_poses[rand_ix] # shuffle
+        print(f'Get new poses, done! Total num of new poses: {n_new_pose}')
+        
+        n_img = len(train_images)
+        n_pseudo_img = [0]
+        args.datadir_kd_new = datadir_kd_new # will be used later
+        for i in range(0, n_new_pose, chunk):
+            poses = kd_poses[i: i+chunk]
+            n_img += len(poses)
+            teacher_target = get_teacher_target(poses, H, W, focal, render_kwargs_train, args, n_pseudo_img)
+            if args.dataset_type == 'blender':
+                save_blender_data(datadir_kd_new, poses, teacher_target)
+            print(f'Create new data. Save to "{datadir_kd_new}". Now total #train samples: {n_img}')
+    
+    elif args.create_data in ['rand']:
+        # set up data directory
+        setup_blender_datadir_rand(datadir_kd_old, datadir_kd_new, args.half_res, args.white_bkgd)
+        print('Set up new data directory, done!')
+
+        # get poses of psuedo data
+        kd_rays = get_novel_rays(args, n_pose=args.n_pose_kd).to(device)
+        rand_ix = np.random.permutation(kd_rays)
+        kd_rays = kd_rays[rand_ix] # shuffle
+        rays_path = f'{datadir_kd_new}/rays.npy'
+        np.save(rays_path, kd_rays)
+
+        rgbs_path = f'{datadir_kd_new}/rgbs.npy'
+        n_ray = 0
+        for i in range(0, len(kd_rays), chunk):
+            # load existing rgbs
+            t_ = time.time()
+            npy = np.load(rgbs_path) if os.path.exists(rgbs_path) else np.array([])
+            t_load = time.time() - t_
+            
+            # get more rgbs
+            t_ = time.time()
+            rays = kd_rays[i: i+chunk]
+            rgbs = get_teacher_target_for_rays(rays, render_kwargs_train)
+            rgbs = to_array(rgbs)
+            t_create = time.time() - t_
+            
+            # save
+            rgbs = np.concatenate([npy, rgbs])
+            np.save(rgbs_path, rgbs)
+            n_ray += rays.shape[0]
+            print(f'Create new data (load time: {t_load:.2f}s. create time: {t_create:.2f}s). Save to "{rgbs_path}". Now total #rays: {n_ray}')
     # ---
     
 if __name__=='__main__':
