@@ -617,8 +617,8 @@ def train():
         data, t0, section = [], time.time(), 0
         for i in range(1, args.n_pose_kd+1):
             pose = get_rand_pose()
-            focal = focal * (np.random.rand() + 1) # scale focal by [1, 2)
-            rays_o, rays_d = get_rays1(H, W, focal, pose) # rays_o, rays_d shape: [H, W, 3]
+            focal_ = focal * (np.random.rand() + 1) # scale focal by [1, 2)
+            rays_o, rays_d = get_rays1(H, W, focal_, pose) # rays_o, rays_d shape: [H, W, 3]
             batch_rays = torch.stack([rays_o, rays_d], 0)
             rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
                                             verbose=False, retraw=False,
