@@ -614,7 +614,7 @@ def train():
         render_kwargs_.pop('teacher_fine')
 
         # run
-        i_save, split_size = 10, 4096 # every 4096 rays will make up a .npy file
+        i_save, split_size = 100, 4096 # every 4096 rays will make up a .npy file
         data, t0, split = [], time.time(), 0
         timer = Timer(args.n_pose_kd)
         for i in range(1, args.n_pose_kd+1):
