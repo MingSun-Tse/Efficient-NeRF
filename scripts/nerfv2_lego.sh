@@ -18,9 +18,9 @@ CUDA_VISIBLE_DEVICES=2 nohup python run_nerf_raybased.py --config configs/lego.t
 # create data (.npy) lego
 CUDA_VISIBLE_DEVICES=2 python run_nerf_create_data.py --config configs/lego.txt --teacher_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --n_pose_kd 100,25,1 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v5_NPose100,25,1 --screen --project nerf__lego__CreateData_NPose100,25,1
 
-CUDA_VISIBLE_DEVICES=3 python run_nerf_create_data.py --config configs/lego.txt --teacher_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --n_pose_kd 100,25,1 --focal_scale 2 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v6_NPose100,25,1_Focal2x --screen --project nerf__lego__CreateData_V6NPose100,25,1_Focal2x
+CUDA_VISIBLE_DEVICES=3 python run_nerf_create_data.py --config configs/lego.txt --teacher_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --n_pose_kd 100,25,1 --focal_scale 2 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v6_NPose100,25,1_Focal2x --screen --project nerf__lego__CreateData_V6NPose100,25,1_Focal2x # data v6. !! This is wrong because the focal is not stored in the json file
 
-CUDA_VISIBLE_DEVICES=0 python run_nerf_create_data.py --create_data rand --config configs/lego.txt --teacher_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --n_pose_kd 5000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v7_Rand_Origins_Dirs --screen --project nerf__lego__CreateData_v7_Rand_Origins_Dirs
+CUDA_VISIBLE_DEVICES=0 python run_nerf_create_data.py --create_data rand --config configs/lego.txt --teacher_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --n_pose_kd 5000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v7_Rand_Origins_Dirs_4096RaysPerNpy --screen --project nerf__lego__CreateData_v7_Rand_Origins_Dirs_4096RaysPerNpy # data v7
 
 
 # create data (.npy) ship
@@ -43,7 +43,9 @@ CUDA_VISIBLE_DEVICES=2 python run_nerf_raybased.py --config configs/lego.txt --n
 
 CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --config configs/lego.txt --n_sample_per_ray 4 --netwidth 1024 --netdepth 32 --skips 8,16,24 --directly_predict_rgb --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v5_NPose100,25,1 --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 16384 --precrop_iters -1 --i_update_data 1000 --pseudo_ratio_schedule 0:0.2,200000:0.8 --screen --project nerfv2__lego__S4W1024D32Skip8,16,24_DPRGB_BS16384_KDMixDataV5
 
-CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --config configs/lego.txt --n_sample_per_ray 4 --netwidth 1024 --netdepth 32 --skips 8,16,24 --directly_predict_rgb --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v6_NPose100,25,1_Focal2x --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 16384 --precrop_iters -1 --i_update_data 1000 --pseudo_ratio_schedule 0:0.2,200000:0.8 --pretrained_ckpt Exp*/*-150058/weights/600000.tar --resume --test_pretrained --screen --project nerfv2__lego__S4W1024D32Skip8,16,24_DPRGB_BS16384_KDMixDataV6 # data v6
+CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --config configs/lego.txt --n_sample_per_ray 4 --netwidth 1024 --netdepth 32 --skips 8,16,24 --directly_predict_rgb --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v6_NPose100,25,1_Focal2x --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 16384 --precrop_iters -1 --i_update_data 1000 --pseudo_ratio_schedule 0:0.2,200000:0.8 --pretrained_ckpt Exp*/*-150058/weights/600000.tar --resume --test_pretrained --screen --project nerfv2__lego__S4W1024D32Skip8,16,24_DPRGB_BS16384_KDMixDataV6 # data v6. !! This is wrong because the focal is not stored in the json file
+
+CUDA_VISIBLE_DEVICES=2 python run_nerf_raybased.py --config configs/lego.txt --n_sample_per_ray 4 --netwidth 1024 --netdepth 32 --skips 8,16,24 --directly_predict_rgb --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v7_Rand_Origins_Dirs_4096RaysPerNpy --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 4 --data_mode rays --screen --pretrained_ckpt Exp*/*-150058/weights/600000.tar --resume --project nerfv2__lego__S4W1024D32Skip8,16,24_DPRGB_BS16384_KDDataV7 --debug --i_print 2 --i_video 5 --i_testset 8 --n_pose_video 10,4,1  # data v7
 
 
 # nerf_v2 + enhance cnn, width 512

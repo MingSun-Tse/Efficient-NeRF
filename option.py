@@ -164,6 +164,8 @@ parser.add_argument('--select_pixel_mode', type=str, default='rand_pixel', choic
 parser.add_argument('--enhance_cnn', type=str, default='', choices=['', 'EDSR', 'RCAN'])
 parser.add_argument('--freeze_pretrained', action='store_true')
 parser.add_argument('--focal_scale', type=float, default=1.)
+parser.add_argument('--data_mode', type=str, default='images', choices=['images', 'rays'],
+        help='which data is used in training, sample rays from images or directly load rays')
 args = parser.parse_args()
 
 if args.video_tag == '':

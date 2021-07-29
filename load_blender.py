@@ -1,6 +1,5 @@
-import os
+import os, time, numpy as np
 import torch
-import numpy as np
 import imageio 
 import json
 import torch.nn.functional as F
@@ -91,6 +90,7 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=Fa
     return to_tensor(imgs), to_tensor(poses), to_tensor(render_poses), [H, W, focal], i_split
 
 def setup_blender_datadir(datadir_old, datadir_new):
+    '''Use existing data as a softlink. Deprecated now'''
     import shutil
     if os.path.exists(datadir_new):
         if os.path.isfile(datadir_new): 
@@ -170,7 +170,7 @@ def save_blender_data(datadir, poses, images, split='train'):
         json.dump(data, f, indent=4)
 
 def load_blender_data_v2(datadir, half_res=False, white_bkgd=True, split='train'):
-    '''Load data with psuedo data'''
+    '''Load data with psuedo data. Deprecated now -- use data loader with .npy'''
     with open(os.path.join(datadir, 'transforms_{}.json'.format(split)), 'r') as fp:
         meta = json.load(fp)
 
@@ -196,6 +196,8 @@ def is_img(x):
     return ext.lower() in ['.png', '.jpeg', '.jpg', '.bmp', '.npy']
 
 class BlenderDataset(Dataset):
+    '''Load data in .npy (they are images stored in .npy).
+    '''
     def __init__(self, datadir, pseudo_ratio=0.5, n_original=100, split='train'):
         self.datadir = datadir
         with open(os.path.join(datadir, 'transforms_{}.json'.format(split)), 'r') as fp:
@@ -216,6 +218,19 @@ class BlenderDataset(Dataset):
 
     def __len__(self):
         return len(self.frames)
+
+class BlenderDataset_v2(Dataset):
+    '''Load data of ray origins and directions. This is the most straight way.
+    '''
+    def __init__(self, datadir, pseudo_ratio=0.5):
+        self.datadir = datadir
+        self.all_splits = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('.npy')]
+    def __getitem__(self, index):
+        d = np.load(self.all_splits[index])
+        d = torch.Tensor(d)
+        return d[:,:3], d[:,3:6], d[:,6:9]
+    def __len__(self):
+        return len(self.all_splits)
 
 def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
     '''Even-spaced sampling
@@ -258,7 +273,3 @@ def get_rand_pose():
     theta = theta1 + np.random.rand() * (theta2 - theta1)
     phi = phi1 + np.random.rand() * (phi2 - phi1)
     return to_tensor(pose_spherical(theta, phi, 4))
-    
-
-
-

@@ -13,7 +13,7 @@ from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedd
 from run_nerf_raybased_helpers import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2, get_selected_coords
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data, BlenderDataset, get_novel_poses
+from load_blender import load_blender_data, BlenderDataset, BlenderDataset_v2, get_novel_poses
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
@@ -588,13 +588,22 @@ class InfiniteSamplerWrapper(data.sampler.Sampler):
 
 def get_dataloader(dataset_type, datadir, pseudo_ratio=0.5):
     if dataset_type == 'blender':
-        trainset = BlenderDataset(datadir, pseudo_ratio)
-        trainloader = torch.utils.data.DataLoader(dataset=trainset, 
-                batch_size=1,
-                num_workers=4,
-                pin_memory=True,
-                sampler=InfiniteSamplerWrapper(len(trainset))
-        )
+        if args.data_mode in ['images']:
+            trainset = BlenderDataset(datadir, pseudo_ratio)
+            trainloader = torch.utils.data.DataLoader(dataset=trainset, 
+                    batch_size=1,
+                    num_workers=4,
+                    pin_memory=True,
+                    sampler=InfiniteSamplerWrapper(len(trainset))
+            )
+        elif args.data_mode in ['rays']:
+            trainset = BlenderDataset_v2(datadir, pseudo_ratio)
+            trainloader = torch.utils.data.DataLoader(dataset=trainset, 
+                    batch_size=args.N_rand,
+                    num_workers=4,
+                    pin_memory=True,
+                    sampler=InfiniteSamplerWrapper(len(trainset))
+            )
     return iter(trainloader), len(trainset)
 
 def get_pseudo_ratio(schedule, current_step):
@@ -856,7 +865,7 @@ def train():
         #         print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {len(train_images)}')
 
         # Sample random ray batch
-        if use_batching: # @mst: False
+        if use_batching: # @mst: False in default
             # Random over all images
             batch = rays_rgb[i_batch: i_batch+N_rand] # [B, 2+1, 3*?]
             batch = torch.transpose(batch, 0, 1)
@@ -868,66 +877,77 @@ def train():
                 rand_idx = torch.randperm(rays_rgb.shape[0])
                 rays_rgb = rays_rgb[rand_idx]
                 i_batch = 0
+        
         else:
             # Random from one image
             img_i = np.random.choice(i_train)
             target = images[img_i]
             pose = poses[img_i, :3,:4]
             
-            # KD
+            # KD, update pose and target
             if args.datadir_kd:
-                if i % args.i_update_data == 0: # update trainloader, possibly load more data
+                if args.data_mode in ['images']:
+                    if i % args.i_update_data == 0: # update trainloader, possibly load more data
+                        if args.dataset_type == 'blender':
+                            t_ = time.time()
+                            pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
+                            trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
+                            print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f}')
+
+                    # get pose and target
                     if args.dataset_type == 'blender':
-                        t_ = time.time()
-                        pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
-                        trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
-                        print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f}')
-
-                # get pose and target
-                if args.dataset_type == 'blender':
-                    target, pose, img_i = [x[0] for x in trainloader.next()] # batch size = 1
-                    target, pose = target.to(device), pose.to(device)
-                    pose = pose[:3, :4]
-                    if img_i >= n_original_img:
-                        n_pseudo_img += 1
-                else: # LLFF dataset
-                    use_pseudo_img = torch.rand(1) < len(kd_poses) / (len(train_poses) + len(kd_poses))
-                    if use_pseudo_img:
-                        img_i = np.random.permutation(len(kd_poses))[0]
-                        pose = kd_poses[img_i, :3, :4]
-                        target = kd_targets[img_i]
-                        n_pseudo_img += 1
+                        target, pose, img_i = [x[0] for x in trainloader.next()] # batch size = 1
+                        target, pose = target.to(device), pose.to(device)
+                        pose = pose[:3, :4]
+                        if img_i >= n_original_img:
+                            n_pseudo_img += 1
+                    else: # LLFF dataset
+                        use_pseudo_img = torch.rand(1) < len(kd_poses) / (len(train_poses) + len(kd_poses))
+                        if use_pseudo_img:
+                            img_i = np.random.permutation(len(kd_poses))[0]
+                            pose = kd_poses[img_i, :3, :4]
+                            target = kd_targets[img_i]
+                            n_pseudo_img += 1
+                    
+                    n_seen_img += 1
+                    loss_line.update('pseudo_img_ratio', n_pseudo_img/ n_seen_img, '.4f')
             
-            n_seen_img += 1
-            loss_line.update('pseudo_img_ratio', n_pseudo_img/ n_seen_img, '.4f')
-
-
+            # get rays (rays_o, rays_d, target_s)
             if N_rand is not None:
-                rays_o, rays_d = get_rays(H, W, focal, pose)  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
-                if i < args.precrop_iters:
-                    dH = int(H//2 * args.precrop_frac)
-                    dW = int(W//2 * args.precrop_frac)
-                    coords = torch.stack(
-                        torch.meshgrid(
-                            torch.linspace(H//2 - dH, H//2 + dH - 1, 2*dH), 
-                            torch.linspace(W//2 - dW, W//2 + dW - 1, 2*dW)
-                        ), -1)
-                    if i == start + 1:
-                        print(f"[Config] Center cropping of size {2*dH} x {2*dW} is enabled until iter {args.precrop_iters}")                
-                else:
-                    coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W)), -1)  # (H, W, 2)
+                if args.data_mode in ['images']:
+                    rays_o, rays_d = get_rays(H, W, focal, pose)  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
+                    if i < args.precrop_iters:
+                        dH = int(H//2 * args.precrop_frac)
+                        dW = int(W//2 * args.precrop_frac)
+                        coords = torch.stack(
+                            torch.meshgrid(
+                                torch.linspace(H//2 - dH, H//2 + dH - 1, 2*dH), 
+                                torch.linspace(W//2 - dW, W//2 + dW - 1, 2*dW)
+                            ), -1)
+                        if i == start + 1:
+                            print(f"[Config] Center cropping of size {2*dH} x {2*dW} is enabled until iter {args.precrop_iters}")                
+                    else:
+                        coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W)), -1)  # (H, W, 2)
 
-                # select pixels as a batch
-                select_coords, patch_bbx = get_selected_coords(coords, N_rand, args.select_pixel_mode)
+                    # select pixels as a batch
+                    select_coords, patch_bbx = get_selected_coords(coords, N_rand, args.select_pixel_mode)
 
-                # get rays_o and rays_d for the selected pixels
-                rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-                rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-                batch_rays = torch.stack([rays_o, rays_d], 0)
+                    # get rays_o and rays_d for the selected pixels
+                    rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+                    rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+                    batch_rays = torch.stack([rays_o, rays_d], 0)
+                    
+                    # get target for the selected pixels
+                    target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 
-                # get target for the selected pixels
-                target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-            
+                elif args.data_mode in ['rays']:
+                    rays_o, rays_d, target_s = trainloader.next()
+                    rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
+                    rays_o = rays_o.view(-1, 3)
+                    rays_d = rays_d.view(-1, 3)
+                    target_s = target_s.view(-1, 3)
+
+            # forward and get loss
             loss = 0
             t_ = time.time()
             if args.model_name == 'nerf':
@@ -993,7 +1013,7 @@ def train():
             # tqdm.write(logstr)
 
             # save image for check
-            if i % (100 * args.i_print) == 0:
+            if args.enhance_cnn and i % (100 * args.i_print) == 0:
                 img = rgb1.reshape([patch_h, patch_w, 3])
                 save_path = f'{logger.gen_img_path}/train_patch_{ExpID}_iter{i}.png'
                 imageio.imwrite(save_path, to8b(img))
