@@ -226,13 +226,15 @@ class BlenderDataset_v2(Dataset):
         self.datadir = datadir
         all_splits = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('.npy')]
         
-        # take out the small-size files
-        all_splits.sort(key=lambda f: os.stat(f).st_size) # ascending order
-        normal_size = os.stat(all_splits[-1]).st_size
-        for i in range(len(all_splits)):
-            if os.stat(all_splits[i]).st_size == normal_size:
-                break
-        self.all_splits = all_splits[i:]
+        # # take out the small-size files
+        # all_splits.sort(key=lambda f: os.stat(f).st_size) # ascending order
+        # normal_size = os.stat(all_splits[-1]).st_size
+        # for i in range(len(all_splits)):
+        #     if os.stat(all_splits[i]).st_size == normal_size:
+        #         break
+        # self.all_splits = all_splits[i:]
+        
+        self.all_splits = all_splits
         print(f'Load data done. #All files: {len(self.all_splits)}')
 
     def __getitem__(self, index):

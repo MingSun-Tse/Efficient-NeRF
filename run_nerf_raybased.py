@@ -592,7 +592,7 @@ def get_dataloader(dataset_type, datadir, pseudo_ratio=0.5):
             trainset = BlenderDataset(datadir, pseudo_ratio)
             trainloader = torch.utils.data.DataLoader(dataset=trainset, 
                     batch_size=1,
-                    num_workers=4,
+                    num_workers=args.num_workers,
                     pin_memory=True,
                     sampler=InfiniteSamplerWrapper(len(trainset))
             )
@@ -600,7 +600,7 @@ def get_dataloader(dataset_type, datadir, pseudo_ratio=0.5):
             trainset = BlenderDataset_v2(datadir, pseudo_ratio)
             trainloader = torch.utils.data.DataLoader(dataset=trainset, 
                     batch_size=args.N_rand,
-                    num_workers=4,
+                    num_workers=args.num_workers,
                     pin_memory=True,
                     sampler=InfiniteSamplerWrapper(len(trainset))
             )
@@ -836,6 +836,10 @@ def train():
     if args.lr:
         lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
 
+    if args.hard_ratio > 0:
+        hard_rays = to_tensor([])
+        n_hard_npy = 0
+
     # training
     timer = Timer((args.N_iters - start) // args.i_testset)
     hist_psnr, hist_psnr1, n_pseudo_img, n_seen_img = 0, 0, 0, 0
@@ -953,7 +957,22 @@ def train():
                     rays_o = rays_o.view(-1, 3)
                     rays_d = rays_d.view(-1, 3)
                     target_s = target_s.view(-1, 3)
-
+            
+            batch_size = rays_o.shape[0]
+            if args.hard_ratio > 0:
+                if hard_rays.shape[0] >= batch_size:
+                    rays_o   = torch.cat([rays_o,   hard_rays[:,  :3]], dim=0)
+                    rays_d   = torch.cat([rays_d,   hard_rays[:, 3:6]], dim=0)
+                    target_s = torch.cat([target_s, hard_rays[:, 6: ]], dim=0)
+                    # save
+                    '''
+                    hard_rays = hard_rays[:batch_size]
+                    n_hard_npy += 1
+                    save_path = f'{datadir_kd_new}/hard_{n_hard_npy}.npy'
+                    np.save(save_path, hard_rays)
+                    '''                    
+                    hard_rays = to_tensor([])  # reset
+            
             # forward and get loss
             loss = 0
             t_ = time.time()
@@ -976,7 +995,7 @@ def train():
                         loss_line.update('loss_perm_invar (*%s)' % args.lw_perm_invar, loss_perm_invar.item(), '.10f')
                     else:
                         rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
-                
+            
             # rgb loss
             loss_rgb = img2mse(rgb, target_s)
             psnr = mse2psnr(loss_rgb)
@@ -1001,6 +1020,14 @@ def train():
             loss.backward()
             optimizer.step()
             t_param_update = time.time() - t_
+
+            # collect hard examples
+            if args.hard_ratio > 0:
+                n_hard = int(args.hard_ratio * batch_size)
+                _, indices = torch.sort( torch.mean((rgb - target_s) ** 2, dim=1) )
+                hard_indices = indices[:n_hard]
+                hard_rays_ = torch.cat([rays_o[hard_indices], rays_d[hard_indices], target_s[hard_indices]], dim=-1)
+                hard_rays = torch.cat([hard_rays, hard_rays_], dim=0)
 
             # smoothing for log print
             if not math.isinf(psnr.item()):
