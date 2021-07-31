@@ -1025,7 +1025,7 @@ def train():
             if args.hard_ratio > 0:
                 n_hard = int(args.hard_ratio * batch_size)
                 _, indices = torch.sort( torch.mean((rgb - target_s) ** 2, dim=1) )
-                hard_indices = indices[:n_hard]
+                hard_indices = indices[-n_hard:]
                 hard_rays_ = torch.cat([rays_o[hard_indices], rays_d[hard_indices], target_s[hard_indices]], dim=-1)
                 hard_rays = torch.cat([hard_rays, hard_rays_], dim=0)
 
