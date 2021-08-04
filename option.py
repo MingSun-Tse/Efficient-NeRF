@@ -114,6 +114,7 @@ parser.add_argument("--i_video",   type=int, default=10000,
 parser.add_argument('--project_name', type=str, default="")
 parser.add_argument('--debug', action="store_true")
 parser.add_argument('--screen_print', action="store_true")
+parser.add_argument('--cache_ignore', type=str, default='')
 
 # @mst: related to nerf_v2
 parser.add_argument('--model_name', type=str, default='nerf_v2', choices=['nerf', 'nerf_v2'])

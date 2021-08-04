@@ -309,6 +309,10 @@ def create_nerf(args, near, far):
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
             print('Resume optimizer successfully')
 
+    # use DataParallel
+    model = torch.nn.DataParallel(model)
+    model_fine = torch.nn.DataParallel(model_fine)
+
     # set up training args
     render_kwargs_train = {
         'network_query_fn' : network_query_fn,
