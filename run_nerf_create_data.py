@@ -646,7 +646,8 @@ def train():
                 data = to_array(data)
 
                 # save
-                for ix in range(0, data.shape[0], split_size):
+                num = data.shape[0] // split_size * split_size
+                for ix in range(0, num, split_size):
                     split += 1
                     save_path = f'{datadir_kd_new}/data_{split}.npy'
                     d = data[ix: ix+split_size]
