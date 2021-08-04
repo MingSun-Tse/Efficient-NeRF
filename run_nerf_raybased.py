@@ -311,7 +311,8 @@ def create_nerf(args, near, far):
 
     # use DataParallel
     model = torch.nn.DataParallel(model)
-    model_fine = torch.nn.DataParallel(model_fine)
+    if model_fine is not None:
+        model_fine = torch.nn.DataParallel(model_fine)
 
     # set up training args
     render_kwargs_train = {
