@@ -171,6 +171,8 @@ parser.add_argument('--num_workers', type=int, default=4,
         help='#cpus when loading data')
 parser.add_argument('--hard_ratio', type=float, default=0,
         help='hard rays ratio in a batch')
+parser.add_argument('--hard_mul', type=float, default=1,
+        help='hard_mul * batch_size is the size of hard ray pool')
 args = parser.parse_args()
 
 if args.video_tag == '':
