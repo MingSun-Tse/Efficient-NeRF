@@ -169,8 +169,8 @@ parser.add_argument('--data_mode', type=str, default='images', choices=['images'
         help='which data is used in training, sample rays from images or directly load rays')
 parser.add_argument('--num_workers', type=int, default=4, 
         help='#cpus when loading data')
-parser.add_argument('--hard_ratio', type=float, default=0,
-        help='hard rays ratio in a batch')
+parser.add_argument('--hard_ratio', type=str, default='',
+        help='hard rays ratio in a batch; seperated by comma')
 parser.add_argument('--hard_mul', type=float, default=1,
         help='hard_mul * batch_size is the size of hard ray pool')
 args = parser.parse_args()
@@ -190,3 +190,9 @@ args.n_pose_kd = check_n_pose(args.n_pose_kd)
 args.n_pose_video = check_n_pose(args.n_pose_video)
 args.pretrained_ckpt = check_path(args.pretrained_ckpt)
 args.teacher_ckpt = check_path(args.teacher_ckpt)
+
+if args.hard_ratio != '':
+    if ',' not in args.hard_ratio:
+        args.hard_ratio = float(args.hard_ratio)
+    else:
+        args.hard_ratio = [float(x) for x in args.hard_ratio.split(',')]

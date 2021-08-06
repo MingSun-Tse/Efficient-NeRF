@@ -841,7 +841,7 @@ def train():
     if args.lr:
         lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
 
-    if args.hard_ratio > 0:
+    if args.hard_ratio:
         hard_rays = to_tensor([])
 
     # training
@@ -964,10 +964,17 @@ def train():
                     target_s = target_s.view(-1, 3)
             
             batch_size = rays_o.shape[0]
-            n_hard = int(args.hard_ratio * batch_size)
+            if isinstance(args.hard_ratio, list):
+                n_hard_in = int(args.hard_ratio[0] * batch_size) # the number of hard samples into the hard pool
+                n_hard_out = int(args.hard_ratio[1] * batch_size) # the number of hard samples out of the hard pool
+            else:
+                n_hard_in = int(args.hard_ratio * batch_size)
+                n_hard_out = n_hard_in
+            n_hard_in = min(n_hard_in, n_hard_out) # n_hard_in <= n_hard_out
+
             if hard_pool_full:
-                rand_ix = np.random.permutation(hard_rays.shape[0])[:n_hard]
-                picked_hard_rays =  hard_rays[rand_ix]
+                rand_ix_out = np.random.permutation(hard_rays.shape[0])[:n_hard_out]
+                picked_hard_rays =  hard_rays[rand_ix_out]
                 rays_o   = torch.cat([rays_o,   picked_hard_rays[:,  :3]], dim=0)
                 rays_d   = torch.cat([rays_d,   picked_hard_rays[:, 3:6]], dim=0)
                 target_s = torch.cat([target_s, picked_hard_rays[:, 6: ]], dim=0)
@@ -1028,12 +1035,12 @@ def train():
             t_param_update = time.time() - t_
 
             # collect hard examples
-            if args.hard_ratio > 0:
+            if args.hard_ratio:
                 _, indices = torch.sort( torch.mean((rgb[:batch_size] - target_s[:batch_size]) ** 2, dim=1) )
-                hard_indices = indices[-n_hard:]
+                hard_indices = indices[-n_hard_in:]
                 hard_rays_ = torch.cat([rays_o[hard_indices], rays_d[hard_indices], target_s[hard_indices]], dim=-1)
                 if hard_pool_full:
-                    hard_rays[rand_ix] = hard_rays_ # replace
+                    hard_rays[rand_ix_out[:n_hard_in]] = hard_rays_ # replace
                 else:
                     hard_rays = torch.cat([hard_rays, hard_rays_], dim=0) # append
                     if hard_rays.shape[0] >= batch_size * args.hard_mul:
