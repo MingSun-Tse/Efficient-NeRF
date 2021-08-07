@@ -797,6 +797,7 @@ def train():
         print('RENDER ONLY')
         expid, iter_ = parse_expid_iter(args.pretrained_ckpt)
         with torch.no_grad():
+            t_ = time.time()
             if args.render_test:
                 print('Rendering test images...')
                 rgbs, *_, test_loss, test_psnr, errors = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, savedir=logger.gen_img_path, render_factor=args.render_factor, new_render_func=new_render_func)
@@ -807,12 +808,13 @@ def train():
                 else:
                     video_poses = render_poses
                 print(f'Rendering video... (n_pose: {len(video_poses)})')
-                rgbs, *_, errors = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=video_targets, savedir=logger.gen_img_path, render_factor=args.render_factor, new_render_func=new_render_func)
+                rgbs, *_, errors = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=video_targets, savedir=None, render_factor=args.render_factor, new_render_func=new_render_func)
+            t = time.time() - t_
         video_path = f'{logger.gen_img_path}/video_{expid}_iter{iter_}_{args.video_tag}.mp4'
         imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
         if errors is not None:
             imageio.mimwrite(video_path.replace('.mp4', '_error.mp4'), to8b(errors), fps=30, quality=8)
-        print(f'Save video: "{video_path}"')
+        print(f'Save video: "{video_path} (time: {t:.2f}s)"')
         exit()
 
     # Prepare raybatch tensor if batching random rays
@@ -964,13 +966,14 @@ def train():
                     target_s = target_s.view(-1, 3)
             
             batch_size = rays_o.shape[0]
-            if isinstance(args.hard_ratio, list):
-                n_hard_in = int(args.hard_ratio[0] * batch_size) # the number of hard samples into the hard pool
-                n_hard_out = int(args.hard_ratio[1] * batch_size) # the number of hard samples out of the hard pool
-            else:
-                n_hard_in = int(args.hard_ratio * batch_size)
-                n_hard_out = n_hard_in
-            n_hard_in = min(n_hard_in, n_hard_out) # n_hard_in <= n_hard_out
+            if args.hard_ratio:
+                if isinstance(args.hard_ratio, list):
+                    n_hard_in = int(args.hard_ratio[0] * batch_size) # the number of hard samples into the hard pool
+                    n_hard_out = int(args.hard_ratio[1] * batch_size) # the number of hard samples out of the hard pool
+                else:
+                    n_hard_in = int(args.hard_ratio * batch_size)
+                    n_hard_out = n_hard_in
+                n_hard_in = min(n_hard_in, n_hard_out) # n_hard_in <= n_hard_out
 
             if hard_pool_full:
                 rand_ix_out = np.random.permutation(hard_rays.shape[0])[:n_hard_out]
@@ -1090,10 +1093,11 @@ def train():
                 t_ = time.time()
                 rgbs, disps, *_, video_loss, video_psnr, errors = render_path(video_poses, hwf, args.chunk, render_kwargs_test, 
                         gt_imgs=video_targets, render_factor=args.render_factor, new_render_func=new_render_func)
+                t_video = time.time() - t_
             video_path = f'{logger.gen_img_path}/video_{ExpID}_iter{i}_{args.video_tag}.mp4'
             imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
             # imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
-            print(f'[VIDEO] Rendering done. Time {(time.time() - t_):.2f}s. Save video: "{video_path}"')
+            print(f'[VIDEO] Rendering done. Time {t_video:.2f}s. Save video: "{video_path}"')
             if video_psnr is not None:
                 print(f'[VIDEO] video_loss {video_loss.item():.4f} video_psnr {video_psnr.item():.4f}')
                 imageio.mimwrite(video_path.replace('.mp4', '_error.mp4'), to8b(errors), fps=30, quality=8)
