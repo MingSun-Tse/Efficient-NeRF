@@ -21,7 +21,7 @@ DEBUG = False
 
 # set up logging directories -------
 from logger import Logger
-from utils import Timer, LossLine, PresetLRScheduler, strdict_to_dict, _weights_init_orthogonal
+from utils import Timer, LossLine, PresetLRScheduler, strdict_to_dict, _weights_init_orthogonal, get_n_params_, get_n_flops_
 from option import args
 
 logger = Logger(args)
@@ -154,6 +154,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     
     rgbs, disps, errors = [], [], []
     for i, c2w in enumerate(render_poses):
+        t0 = time.time()
         if new_render_func: # our new rendering func
             model = render_kwargs['network_fn']
             perturb = render_kwargs['perturb']
@@ -179,6 +180,8 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         else: # original implementation
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)    
         
+        print(f'{time.time() - t0:.4f}s')
+
         rgbs.append(rgb)
         disps.append(disp)
 
@@ -284,6 +287,16 @@ def create_nerf(args, near, far):
                                                                     netchunk=args.netchunk)
     # set up optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
+
+    # # get FLOPs and params
+    n_params = get_n_params_(model)
+    if args.model_name == 'nerf':
+        pass
+    elif args.model_name == 'nerf_v2':
+        dummy_rays_o = torch.randn(1, 3).to(device)
+        dummy_rays_d = torch.randn(1, 3).to(device)
+        n_flops = get_n_flops_(model, dummy_rays_o, {'rays_d': dummy_rays_d})
+    print(f'Model FLOPs {n_flops/1e6}M    Params {n_params/1e6}M' )
 
     # start iteration
     start = 0
@@ -703,6 +716,7 @@ def train():
     new_render_func = False
     if args.model_name in ['nerf_v2']:
         new_render_func = True
+    print(f'Created model {args.model_name}')
 
     bds_dict = {
         'near' : near,
