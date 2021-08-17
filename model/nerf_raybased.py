@@ -259,7 +259,8 @@ class NeRF_v2(nn.Module):
             for _ in range(D_head - 2):
                 head += [nn.Linear(W, W), nn.ReLU()]
             head += [nn.Linear(W, n_sample_per_ray), nn.Sigmoid()]
-        self.head = nn.Sequential(*head)
+        if self.args.learn_pts:
+            self.head = nn.Sequential(*head)
 
         # body network
         if args.use_group_conv:

@@ -1054,8 +1054,7 @@ def train():
                 for name, m in model.named_modules():
                     if isinstance(m, (nn.Linear)):
                         norm = torch.norm(m.weight.data, p=2, dim=-1, keepdim=True) # [d_out, 1]
-                        norm = norm.expand_as(m.weight.data) # [d_out, d_in]
-                        grad = m.weight.data / norm
+                        grad = m.weight.data / norm.expand_as(m.weight.data) # [d_out, d_in]
                         m.weight.grad.data.add_(args.group_l2 * grad)
             
             optimizer.step()
@@ -1097,14 +1096,14 @@ def train():
                 imageio.imwrite(save_path, to8b(img))
 
         # check gradients to make sure group_l2 works normally
-        if args.group_l2 and i % (args.i_print * 10) == 0:
-            n_neuron_print = 5
-            print('neuron norms:')
+        if args.group_l2 and i % (args.i_print * 0.1) == 0:
+            n_neuron_print = 8
+            print(f'iter {i} neuron norms (penalty factor {args.group_l2}):')
             for name, m in model.named_modules():
                 if isinstance(m, (nn.Linear)):
-                    logstr = ['%.4f' % x for x in torch.norm(m.weight.data, p=2, dim=-1)[:n_neuron_print]]
-                    logstr = f'{name}: ' + ' '.join(logstr)
-                print(logstr)
+                    logstr = ['%.6f' % x for x in torch.norm(m.weight.data, p=2, dim=-1)[:n_neuron_print]]
+                    logstr = f'{name:<22s}: ' + ' '.join(logstr)
+                    netprint(logstr)
         
         # test: using the splitted test images
         if i % args.i_testset == 0:
