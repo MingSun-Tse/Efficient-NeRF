@@ -180,8 +180,6 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         else: # original implementation
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)    
         
-        print(f'{time.time() - t0:.4f}s')
-
         rgbs.append(rgb)
         disps.append(disp)
 
