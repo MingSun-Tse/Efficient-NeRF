@@ -173,6 +173,8 @@ parser.add_argument('--hard_ratio', type=str, default='',
         help='hard rays ratio in a batch; seperated by comma')
 parser.add_argument('--hard_mul', type=float, default=1,
         help='hard_mul * batch_size is the size of hard ray pool')
+parser.add_argument('--group_l2', type=float, default=0,
+        help='group_l2 regularization factor')
 args = parser.parse_args()
 
 if args.video_tag == '':

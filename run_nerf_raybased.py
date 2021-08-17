@@ -1048,6 +1048,16 @@ def train():
             t_ = time.time()
             optimizer.zero_grad()
             loss.backward()
+
+            # group l2 regularization
+            if args.group_l2:
+                for name, m in model.named_modules():
+                    if isinstance(m, (nn.Linear)):
+                        norm = torch.norm(m.weight.data, p=2, dim=-1, keepdim=True) # [d_out, 1]
+                        norm = norm.expand_as(m.weight.data) # [d_out, d_in]
+                        grad = m.weight.data / norm
+                        m.weight.grad.data.add_(args.group_l2 * grad)
+            
             optimizer.step()
             t_param_update = time.time() - t_
 
@@ -1086,6 +1096,16 @@ def train():
                 save_path = f'{logger.gen_img_path}/train_patch_{ExpID}_iter{i}.png'
                 imageio.imwrite(save_path, to8b(img))
 
+        # check gradients to make sure group_l2 works normally
+        if args.group_l2 and i % (args.i_print * 10) == 0:
+            n_neuron_print = 5
+            print('neuron norms:')
+            for name, m in model.named_modules():
+                if isinstance(m, (nn.Linear)):
+                    logstr = ['%.4f' % x for x in torch.norm(m.weight.data, p=2, dim=-1)[:n_neuron_print]]
+                    logstr = f'{name}: ' + ' '.join(logstr)
+                print(logstr)
+        
         # test: using the splitted test images
         if i % args.i_testset == 0:
             testsavedir = f'{logger.gen_img_path}/testset_{ExpID}_iter{i}' # save the renderred test images
