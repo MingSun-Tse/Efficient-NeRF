@@ -241,59 +241,29 @@ class NeRF_v2(nn.Module):
         self.skips = [int(x) for x in args.skips.split(',')] if args.skips else []
         self.print = print
         assert args.n_sample_per_ray >= 1
+        n_sample = args.n_sample_per_ray
 
         # positional embedding function
         self.embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
         if args.use_viewdirs:
             self.embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
 
-        # head network, get predicted sampled points
-        n_sample_per_ray, D_head = args.n_sample_per_ray, args.D_head
-        dim_in = input_ch + input_ch_views if args.encode_input else 6 # 6: postion 3 + pose 3
-        if D_head == 1:
-            head = [nn.Linear(dim_in, n_sample_per_ray), nn.Sigmoid()]
-        elif D_head == 2:
-            head = [nn.Linear(dim_in, W), nn.ReLU(), nn.Linear(W, n_sample_per_ray), nn.Sigmoid()]
-        else:
-            head = [nn.Linear(dim_in, W), nn.ReLU()]
-            for _ in range(D_head - 2):
-                head += [nn.Linear(W, W), nn.ReLU()]
-            head += [nn.Linear(W, n_sample_per_ray), nn.Sigmoid()]
-        if self.args.learn_pts:
-            self.head = nn.Sequential(*head)
-
         # body network
-        if args.use_group_conv:
-            modules = [nn.Conv2d(input_ch * n_sample_per_ray, W, kernel_size=1, groups=n_sample_per_ray)]
-            for i in range(D - 1):
-                if i not in self.skips:
-                    modules += [nn.Conv2d(W, W, kernel_size=1, groups=n_sample_per_ray)]
-                else:
-                    modules += [nn.Conv2d(W + input_ch * n_sample_per_ray, W, kernel_size=1, groups=n_sample_per_ray)]
-            self.pts_linears = nn.ModuleList(modules)
-        else:
-            self.pts_linears = nn.ModuleList(
-                [nn.Linear(input_ch * n_sample_per_ray, W)] + [nn.Linear(W, W) if i not in self.skips else nn.Linear(W + input_ch * n_sample_per_ray, W) for i in range(D - 1)])
+        self.pts_linears = nn.ModuleList(
+            [nn.Linear(input_ch * n_sample, W)] + [nn.Linear(W, W) if i not in self.skips else nn.Linear(W + input_ch * n_sample, W) for i in range(D - 1)])
             
         ### Implementation according to the official code release (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
-        if self.args.use_group_conv:
-            self.views_linears = nn.ModuleList([nn.Conv2d(input_ch_views * n_sample_per_ray + W, W//2, kernel_size=1, groups=n_sample_per_ray)])
-        else:
-            self.views_linears = nn.ModuleList([nn.Linear(input_ch_views * n_sample_per_ray + W, W//2)])
+        self.views_linears = nn.ModuleList([nn.Linear(input_ch_views * n_sample + W, W//2)])
 
         ### Implementation according to the paper
         # self.views_linears = nn.ModuleList(
         #     [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2, W//2) for i in range(D//2)])
         
         if args.use_viewdirs:
-            if self.args.use_group_conv:
-                self.feature_linear = nn.Conv2d(W, W, kernel_size=1, groups=n_sample_per_ray)
-                self.alpha_linear = nn.Conv2d(W, n_sample_per_ray, kernel_size=1, groups=n_sample_per_ray)
-                self.rgb_linear = nn.Conv2d(W//2, 3 * n_sample_per_ray, kernel_size=1, groups=n_sample_per_ray)
-            else:
-                self.feature_linear = nn.Linear(W, W)
-                self.alpha_linear = nn.Linear(W, n_sample_per_ray)
-                self.rgb_linear = nn.Linear(W//2, 3 * n_sample_per_ray)
+            self.feature_linear = nn.Linear(W, W)
+            if not args.directly_predict_rgb:
+                self.alpha_linear = nn.Linear(W, n_sample)
+            self.rgb_linear = nn.Linear(W//2, 3 * n_sample)
         else:
             output_ch = 5 if args.N_importance > 0 else 4
             self.output_linear = nn.Linear(W, output_ch)
@@ -304,50 +274,25 @@ class NeRF_v2(nn.Module):
                                                                     embeddirs_fn=self.embeddirs_fn,
                                                                     netchunk=args.netchunk)
 
-        # use dropout
-        self.dropout_layer = [10000, 10000] # a large int as placeholder
-        if self.args.dropout_layer:
-            self.dropout_layer = [int(x) for x in self.args.dropout_layer.split(',')]
-        
     def forward(self, rays_o, rays_d, global_step=-1, perturb=0, perm_invar=False):
         n_ray = rays_o.size(0)
         n_sample = self.args.n_sample_per_ray
 
         if n_sample > 1:
-            # predict depth of sampled points
-            if self.args.learn_pts:
-                # set up input
-                input = torch.cat([rays_o, rays_d], dim=-1) # [n_ray, 6]
-                if self.args.encode_input:
-                    embedded_rays_o = self.embed_fn(rays_o)
-                    embedded_rays_d = self.embeddirs_fn(rays_d)
-                    input = torch.cat([embedded_rays_o, embedded_rays_d], dim=-1) # [n_ray, 90]
-                
-                # get sample depths
-                intervals = self.head(input) / (0.5 * n_sample) # [n_ray, n_sample]
-                t_vals = torch.cumsum(intervals, dim=1) # make sure it is in ascending order
-                if global_step % self.args.i_print == 0:
-                    logtmp = ['%.3f' % x for x in t_vals[0]]
-                    self.print('t_vals: ' + ' '.join(logtmp))
-                z_vals = self.near * (1 - t_vals) + self.far * t_vals # depth, [n_ray, n_sample]
-            else:
-                t_vals = torch.linspace(0., 1., steps=n_sample).to(device)
-                t_vals = t_vals[None, :].expand(n_ray, n_sample)
-                z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
-                if perturb > 0.:
-                    # get intervals between samples
-                    mids = .5 * (z_vals[...,1:] + z_vals[...,:-1])
-                    upper = torch.cat([mids, z_vals[...,-1:]], -1)
-                    lower = torch.cat([z_vals[...,:1], mids], -1)
-                    # stratified samples in those intervals
-                    t_rand = torch.rand(z_vals.shape).to(device) # uniform dist [0, 1)
-                    z_vals = lower + (upper - lower) * t_rand
+            t_vals = torch.linspace(0., 1., steps=n_sample).to(device)
+            t_vals = t_vals[None, :].expand(n_ray, n_sample)
+            z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
+            if perturb > 0.:
+                # get intervals between samples
+                mids = .5 * (z_vals[...,1:] + z_vals[...,:-1])
+                upper = torch.cat([mids, z_vals[...,-1:]], -1)
+                lower = torch.cat([z_vals[...,:1], mids], -1)
+                # stratified samples in those intervals
+                t_rand = torch.rand(z_vals.shape).to(device) # uniform dist [0, 1)
+                z_vals = lower + (upper - lower) * t_rand
         
             # get sample coordinates
             pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, 3]
-            if perm_invar: # permutation invariance prior
-                rand_index = torch.randperm(n_sample)
-                pts = pts[:, rand_index]
 
             # positional embedding
             embedded_pts = self.embed_fn(pts.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
@@ -362,99 +307,51 @@ class NeRF_v2(nn.Module):
                 #     rays_o, rays_d = get_rays(H, W, focal, c2w_staticcam)
                 viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True) # @mst: 'rays_d' is real-world data, needs normalization.
                 viewdirs = torch.reshape(viewdirs, [-1, 3]).float() # [n_ray, 3]
-                dirs = viewdirs[:, None].expand(pts.shape) # [n_ray, 3] -> [n_ray, n_sample_per_ray, 3]
+                dirs = viewdirs[:, None].expand(pts.shape) # [n_ray, 3] -> [n_ray, n_sample, 3]
 
                 if perm_invar: # permutation invariance prior
                     dirs = dirs[:, rand_index]
 
                 dirs = torch.reshape(dirs, (-1, 3))
                 embedded_dirs = self.embeddirs_fn(dirs)
-                embedded_dirs = embedded_dirs.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray * 27]
+                embedded_dirs = embedded_dirs.view(rays_o.size(0), -1) # [n_ray, n_sample * 27]
         
         else: # n_sample = 1
             embedded_pts = self.embed_fn(rays_o) # [n_ray, 63]
             embedded_dirs = self.embeddirs_fn(rays_d / rays_d.norm(dim=-1, keepdim=True)) # [n_ray, 27]
 
         # body network
-        if self.args.use_group_conv:
-            h = embedded_pts
-            h = h[..., None, None]
-            for i, layer in enumerate(self.pts_linears):
+        h = embedded_pts
+        for i, layer in enumerate(self.pts_linears):
+            h = F.relu(layer(h))
+            if i in self.skips:
+                h = torch.cat([embedded_pts, h], dim=-1)
+
+        # get raw outputs
+        if self.args.use_viewdirs:
+            # get rgb
+            feature = self.feature_linear(h)
+            h = torch.cat([feature, embedded_dirs], -1)
+            for i, layer in enumerate(self.views_linears):
                 h = F.relu(layer(h))
-                if i in self.skips:
-                    h = h.view(n_ray, n_sample, -1)
-                    embedded_pts = embedded_pts.view(n_ray, n_sample, -1)
-                    h = torch.cat([h, embedded_pts], dim=-1) # [n_ray, n_sample_per_ray, -1]
-                    h = h.view(n_ray, -1, 1, 1) # [n_ray, W + n_sample_per_ray * input_ch, 1, 1]
-            # get raw outputs
-            if self.args.use_viewdirs:
-                alpha = self.alpha_linear(h)[..., 0, 0] # [n_ray, n_sample_per_ray]
-                feature = self.feature_linear(h) # [n_ray, W + n_sample_per_ray * input_ch_views, 1, 1]
+            rgb = self.rgb_linear(h)
 
-                feature = feature.view(n_ray, n_sample, -1)
-                embedded_dirs = embedded_dirs.view(n_ray, n_sample, -1)
-                h = torch.cat([feature, embedded_dirs], dim=-1)
-                h = h.view(n_ray, -1, 1, 1)
-            
-                for i, l in enumerate(self.views_linears):
-                    h = self.views_linears[i](h)
-                    h = F.relu(h)
-
-                rgb = self.rgb_linear(h)[..., 0, 0]
-                raw = torch.cat([rgb, alpha], dim=-1)
-                raw = raw.view(n_ray, -1, 4) # [n_ray, n_sample_per_ray, 4]
-        else:
-            h = embedded_pts
-            for i, layer in enumerate(self.pts_linears):
-                h = F.relu(layer(h))
-                if i >= self.dropout_layer[0]:
-                    h = F.dropout(h, p=self.args.dropout_ratio)
-                if i in self.skips:
-                    h = torch.cat([embedded_pts, h], dim=-1)
-
-            # get raw outputs
-            if self.args.use_viewdirs:
-                alpha = self.alpha_linear(h) # [n_ray, n_sample_per_ray]
-                feature = self.feature_linear(h)
-                h = torch.cat([feature, embedded_dirs], -1)
-                for i, layer in enumerate(self.views_linears):
-                    h = F.relu(layer(h))
-                    if i >= self.dropout_layer[1]:
-                        h = F.dropout(h, p=self.args.dropout_ratio)
-                rgb = self.rgb_linear(h)
-                raw = torch.cat([rgb, alpha], dim=-1)
-                raw = raw.view(n_ray, -1, 4) # [n_ray, n_sample_per_ray, 4]
+            # get alpha
+            if self.args.directly_predict_rgb:
+                raw = rgb # # [n_ray, n_sample * 3]
+            else:
+                alpha = self.alpha_linear(h) # [n_ray, n_sample]
+                raw = torch.cat([rgb, alpha], dim=-1) # [n_ray, n_sample * 4]
+            raw = raw.view(n_ray, n_sample, -1) # [n_ray, n_sample, -1]
         
-        if perm_invar:
-            inv_rand_index = torch.argsort(rand_index)
-            raw = raw[:, inv_rand_index]
-
         # rendering
         if self.args.directly_predict_rgb:
             rgb_map = torch.sigmoid(raw[..., :3].mean(dim=1)) # [n_ray, 3]
             disp_map = rgb_map # placeholder
             return rgb_map, disp_map
-        
         else: # use rendering equation
             rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False, global_step=global_step, print=self.print)
             return rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs
-    
-    def perm_invar_forward(self, rays_o, rays_d, global_step=-1, perturb=0):
-        rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs = self.forward(rays_o, rays_d, global_step=global_step, perturb=perturb)
-        raws = []
-        for _ in range(self.args.n_perm_invar):
-            out = self.forward(rays_o, rays_d, global_step=-1, perturb=perturb, perm_invar=True)
-            raws.append(out[5])
-        raws = torch.cat(raws, dim=0) # [n_perm_invar, n_ray, n_sample, 4]
-        loss_perm_invar = torch.var(raws, dim=0).mean()
-
-        # print log
-        # if global_step % self.args.i_print == 0:
-        #     raws = raws.view(self.args.n_perm_invar, -1)
-        #     for i in range(self.args.n_perm_invar):
-        #         logtmp = ['%.3f' % x for x in raws[i]]
-        #         self.print(' '.join(logtmp))
-        return rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs, loss_perm_invar
 
 
 def default_conv(in_channels, out_channels, kernel_size, bias=True):
