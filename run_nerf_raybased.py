@@ -295,8 +295,8 @@ def create_nerf(args, near, far):
     elif args.model_name == 'nerf_v2':
         dummy_rays_o = torch.randn(1, 3).to(device)
         dummy_rays_d = torch.randn(1, 3).to(device)
-        n_flops = get_n_flops_(model, dummy_rays_o, {'rays_d': dummy_rays_d})
-    print(f'Model FLOPs {n_flops/1e6}M    Params {n_params/1e6}M' )
+        n_flops = get_n_flops_(model, input=dummy_rays_o, rays_d=dummy_rays_d)
+    print(f'Model: FLOPs {n_flops/1e6:.4f}M, Params {n_params/1e6:.4f}M')
 
     # start iteration
     start = 0
