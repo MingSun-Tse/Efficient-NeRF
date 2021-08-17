@@ -51,6 +51,8 @@ CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --config configs/lego.txt --n
 
 CUDA_VISIBLE_DEVICES=2 python run_nerf_raybased.py --config configs/lego.txt --n_sample_per_ray 4 --netwidth 1024 --netdepth 32 --skips 8,16,24 --directly_predict_rgb --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v7_Rand_Origins_Dirs_4096RaysPerNpy --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 4 --data_mode rays --i_update_data 100000000 --hard_ratio 0.0625 --screen --project nerfv2__lego__S4W1024D32Skip8,16,24_DPRGB_BS16384_KDDataV7_Hard0.0625 # data v7, hard rays
 
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 python run_nerf_raybased.py --config configs/lego.txt --n_sample_per_ray 16 --netwidth 1024 --netdepth 8 --skips 4 --directly_predict_rgb --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 20 --data_mode rays --i_update_data 100000000 --hard_ratio 0.2 --hard_mul 20 --screen --cache_ignore data --project nerfv2__lego__S16W1024D8Skip4_DPRGB_BS98304_KDDataV8_Hard0.2_20xBS_GL21e-3 --group_l2 1e-3 # data v8, group_l2 reg
+
 # nerf_v2 + enhance cnn, width 512
 CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --config configs/lego.txt --n_sample_per_ray 4 --netwidth 512 --netdepth 32 --skips 8,16,24 --directly_predict_rgb --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v5_NPose100,25,1 --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 16384 --precrop_iters -1 --i_update_data 1000 --pseudo_ratio_schedule 0:0.2,200000:0.8 --screen --enhance_cnn EDSR --select_pixel_mode rand_patch --project nerfv2__lego__S4W512D32Skip8,16,24_DPRGB_BS16384_KDMixDataV5_EDSR
 # nerf_v2 + enhance cnn, width 512, n_sample_per_ray 1
@@ -84,7 +86,7 @@ CUDA_VISIBLE_DEVICES=3 python run_nerf_raybased.py --config configs/fern.txt --n
 
 
 ## Test: nerf, lego
-CUDA_VISIBLE_DEVICES=2 python run_nerf_raybased.py --config configs/lego.txt --model_name nerf --pretrained_ckpt Experiments/*-195444/*/200000.tar --render_only --n_pose_video 3 --debug
+CUDA_VISIBLE_DEVICES=2 python run_nerf_raybased.py --config configs/lego.txt --model_name nerf --pretrained_ckpt Experiments/*-195444/*/200000.tar --render_only --n_pose_video [50,4,1] --project Test_nerf_lego_pose50,4,1 --screen
 
 # new n_pose
 CUDA_VISIBLE_DEVICES=2 python run_nerf_raybased.py --config configs/lego.txt --model_name nerf --pretrained_ckpt Experiments/*-195444/*/200000.tar --render_only --n_pose_video sample:20,fixed:-72,fixed:5 --video_tag 20ThetasPhi-72Radius5 --project Test_nerf_lego_20ThetasPhi-72Radius5 --screen --debug
@@ -92,15 +94,16 @@ CUDA_VISIBLE_DEVICES=2 python run_nerf_raybased.py --config configs/lego.txt --m
 CUDA_VISIBLE_DEVICES=2 python run_nerf_raybased.py --config configs/lego.txt --model_name nerf --pretrained_ckpt Experiments/*-195444/*/200000.tar --render_only --n_pose_video sample:20,fixed:-72,fixed:5 --trans_origin fixed --video_tag 20ThetasPhi-72Radius5_TransOriginFixed --project Test_nerf_lego_20ThetasPhi-72Radius5_TransOriginFixed --screen --debug
 
 ## Test: nerf, fern
-CUDA_VISIBLE_DEVICES=3 python run_nerf_raybased.py --config configs/fern.txt --model_name nerf --pretrained_ckpt Experiments/*-181900/*/200000.tar --render_only --render_test --debug
+CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --config configs/fern.txt --model_name nerf --pretrained_ckpt Experiments/*-181900/*/200000.tar --render_only --render_test --debug
 
 ## Test: nerf, ship
 CUDA_VISIBLE_DEVICES=3 python run_nerf_raybased.py --config configs/ship.txt --model_name nerf --pretrained_ckpt Experiments/*-170545/*/200000.tar --render_only --project Test_nerf_ship --screen
 
 ## Test: nerf_v2, lego
-CUDA_VISIBLE_DEVICES=3 python run_nerf_raybased.py --config configs/lego.txt --render_only --n_sample_per_ray 4 --netwidth 1024 --netdepth 32 --skips 8,16,24 --directly_predict_rgb --n_pose_video 50,5,4 --pretrained_ckpt Experiments/*-190401/weights/600000.tar --project Test_nerfv2_lego_190401_iter600000 --screen
+CUDA_VISIBLE_DEVICES=3 python run_nerf_raybased.py --config configs/lego.txt --render_only --n_sample_per_ray 16 --netwidth 1024 --netdepth 8 --skips 4 --directly_predict_rgb --n_pose_video 50,4,1 --pretrained_ckpt Experiments/*-011439/weights/600000.tar --project Test_nerfv2_lego_190401_iter600000 --screen
 
-CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --config configs/lego.txt --render_only --n_sample_per_ray 4 --netwidth 512 --netdepth 64 --skips 16,32,48 --directly_predict_rgb --render_test --pretrained_ckpt Experiments/*-111745/weights/600000.tar --project RenderTest_nerfv2_lego_190401_iter600000 --screen --trans_origin 40 --debug
+CUDA_VISIBLE_DEVICES=3 python run_nerf_raybased.py --config configs/lego.txt --render_only --n_sample_per_ray 16 --netwidth 1024 --netdepth 8 --skips 4 --directly_predict_rgb --pretrained_ckpt Experiments/*-110211/weights/1200000.tar --project Video_nerfv2_lego_110211_iter1200000_pose100 --n_pose_video 100 --screen
+
 
 # test changing H, W
 CUDA_VISIBLE_DEVICES=3 python run_nerf_raybased.py --config configs/lego.txt --render_only --n_sample_per_ray 4 --netwidth 1024 --netdepth 32 --skips 8,16,24 --directly_predict_rgb --n_pose_video 10 --pretrained_ckpt Experiments/*-190401/weights/600000.tar --project Test_nerfv2_lego_190401_iter600000_HW800 --screen
