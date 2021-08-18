@@ -431,3 +431,82 @@ class EDSR(nn.Module):
         x = self.tail(res)
         x = self.add_mean(x)
         return x
+
+class NeRF_v3(nn.Module):
+    '''New idea: one forward to get multi-outputs.
+    '''
+    def __init__(self, args, near, far, print=print):
+        super(NeRF_v3, self).__init__()
+        self.args = args
+        self.near = near
+        self.far = far
+        D, W = args.netdepth, args.netwidth
+        self.skips = [int(x) for x in args.skips.split(',')] if args.skips else []
+        self.print = print
+        assert args.n_sample_per_ray >= 1
+        n_sample = args.n_sample_per_ray
+
+        # positional embedding function
+        self.embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
+        if args.use_viewdirs:
+            self.embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
+
+        # network
+        self.head = nn.Sequential(*[nn.Linear((input_ch+input_ch_views)*n_sample, W), nn.ReLU()])
+        body = []
+        for _ in range(D - 2):
+            body += [nn.Linear(W, W), nn.ReLU()]
+        self.body = nn.Sequential(*body)
+        self.tail = nn.Sequential(*[nn.Linear(W, 3), nn.Sigmoid()])
+            
+    def forward(self, rays_o, rays_d, global_step=-1, perturb=0):
+        n_ray = rays_o.size(0)
+        n_sample = self.args.n_sample_per_ray
+
+        if n_sample > 1:
+            t_vals = torch.linspace(0., 1., steps=n_sample).to(device)
+            t_vals = t_vals[None, :].expand(n_ray, n_sample)
+            z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
+            if perturb > 0.:
+                # get intervals between samples
+                mids = .5 * (z_vals[...,1:] + z_vals[...,:-1])
+                upper = torch.cat([mids, z_vals[...,-1:]], -1)
+                lower = torch.cat([z_vals[...,:1], mids], -1)
+                # stratified samples in those intervals
+                t_rand = torch.rand(z_vals.shape).to(device) # uniform dist [0, 1)
+                z_vals = lower + (upper - lower) * t_rand
+        
+            # get sample coordinates
+            pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, 3]
+
+            # positional embedding
+            embedded_pts = self.embed_fn(pts.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
+            embedded_pts = embedded_pts.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray*63]
+
+            # pose embedding
+            if self.args.use_viewdirs:
+                # provide ray directions as input
+                viewdirs = rays_d
+                # if c2w_staticcam is not None:
+                #     # special case to visualize effect of viewdirs
+                #     rays_o, rays_d = get_rays(H, W, focal, c2w_staticcam)
+                viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True) # @mst: 'rays_d' is real-world data, needs normalization.
+                viewdirs = torch.reshape(viewdirs, [-1, 3]).float() # [n_ray, 3]
+                dirs = viewdirs[:, None].expand(pts.shape) # [n_ray, 3] -> [n_ray, n_sample, 3]
+                dirs = torch.reshape(dirs, (-1, 3))
+                embedded_dirs = self.embeddirs_fn(dirs)
+                embedded_dirs = embedded_dirs.view(rays_o.size(0), -1) # [n_ray, n_sample * 27]
+        
+        else: # n_sample = 1
+            embedded_pts = self.embed_fn(rays_o) # [n_ray, 63]
+            embedded_dirs = self.embeddirs_fn(rays_d / rays_d.norm(dim=-1, keepdim=True)) # [n_ray, 27]
+
+        # forward
+        x = torch.cat([embedded_pts, embedded_dirs], dim=-1)
+        h = self.head(x)
+        if self.args.use_residual:
+            h = self.body(h) + h
+        else:
+            h = self.body(h)
+        rgb = self.tail(h)
+        return rgb, rgb

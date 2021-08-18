@@ -1046,7 +1046,7 @@ def train():
             elif args.model_name in ['nerf_v3']:
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
-                rgb = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
+                rgb, *_ = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
             
             # rgb loss
             loss_rgb = img2mse(rgb, target_s)
