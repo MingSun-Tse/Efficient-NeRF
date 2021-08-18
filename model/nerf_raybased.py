@@ -457,7 +457,10 @@ class NeRF_v3(nn.Module):
         for _ in range(D - 2):
             body += [nn.Linear(W, W), nn.ReLU()]
         self.body = nn.Sequential(*body)
-        self.tail = nn.Sequential(*[nn.Linear(W, 3), nn.Sigmoid()])
+        if args.linear_tail:
+            self.tail = nn.Linear(W, 3)
+        else:
+            self.tail = nn.Sequential(*[nn.Linear(W, 3), nn.Sigmoid()])
             
     def forward(self, rays_o, rays_d, global_step=-1, perturb=0):
         n_ray = rays_o.size(0)

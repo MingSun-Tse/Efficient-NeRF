@@ -180,6 +180,7 @@ parser.add_argument('--pruner', type=str, default='',
 parser.add_argument('--stage_pr', type=str, default='',
         help='to assign layer-wise pruning ratio')
 parser.add_argument('--use_residual', action='store_true')
+parser.add_argument('--linear_tail', action='store_true')
 args = parser.parse_args()
 
 if args.video_tag == '':
