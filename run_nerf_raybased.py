@@ -7,13 +7,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # from torch.utils.tensorboard import SummaryWriter
-from model.nerf_raybased import NeRF, NeRF_v2
+from model.nerf_raybased import NeRF, NeRF_v2, NeRF_v3
 from model.enhance_cnn import EDSR
 from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder
 from run_nerf_raybased_helpers import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2, get_selected_coords
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, BlenderDataset, BlenderDataset_v2, get_novel_poses
+from ptflops import get_model_complexity_info
+from pruner import pruner_dict
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
@@ -254,6 +256,10 @@ def create_nerf(args, near, far):
             model.apply(lambda m: _weights_init_orthogonal(m, act=act_func))
             print(f'Use orth init. Activation func: {act_func}')
 
+    elif args.model_name in ['nerf_v3']:
+        model = NeRF_v3(args, near, far, print=netprint).to(device)
+        grad_vars += list(model.parameters())
+
     # in KD, there is a pretrained teacher
     if args.teacher_ckpt:
         teacher_fn = NeRF(D=8, W=256, input_ch=63, output_ch=4, skips=[4], input_ch_views=27, 
@@ -286,16 +292,6 @@ def create_nerf(args, near, far):
     # set up optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
 
-    # # get FLOPs and params
-    n_params = get_n_params_(model)
-    if args.model_name == 'nerf':
-        pass
-    elif args.model_name == 'nerf_v2':
-        dummy_rays_o = torch.randn(1, 3).to(device)
-        dummy_rays_d = torch.randn(1, 3).to(device)
-        n_flops = get_n_flops_(model, input=dummy_rays_o, rays_d=dummy_rays_d)
-    print(f'Model: FLOPs {n_flops/1e6:.4f}M, Params {n_params/1e6:.4f}M')
-
     # start iteration
     start = 0
 
@@ -324,6 +320,12 @@ def create_nerf(args, near, far):
     model = torch.nn.DataParallel(model)
     if model_fine is not None:
         model_fine = torch.nn.DataParallel(model_fine)
+
+    # pruning
+    if args.model_name == 'nerf_v2' and args.pruner:
+        class passer: pass
+        pruner = pruner_dict[args.pruner].Pruner(model, args, logger, passer)
+        model = pruner.prune()
 
     # set up training args
     render_kwargs_train = {
@@ -356,6 +358,23 @@ def create_nerf(args, near, far):
     if args.enhance_cnn:
         render_kwargs_train['network_enhance'] = model_enhance
         render_kwargs_test['network_enhance'] = model_enhance
+
+    # get FLOPs and params
+    n_params = get_n_params_(model)
+    if args.model_name == 'nerf':
+        dummy_input = torch.randn(1, input_ch + input_ch_views).to(device)
+        n_flops = get_n_flops_(model, input=dummy_input, count_adds=False) * (args.N_samples + args.N_samples +  args.N_importance)
+
+        # macs, params = get_model_complexity_info(model, dummy_input.shape, as_strings=True,
+        #                                         print_per_layer_stat=True, verbose=True)
+        # print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
+        # print('{:<30}  {:<8}'.format('Number of parameters: ', params))
+        
+    elif args.model_name in ['nerf_v2', 'nerf_v3']:
+        dummy_rays_o = torch.randn(1, 3).to(device)
+        dummy_rays_d = torch.randn(1, 3).to(device)
+        n_flops = get_n_flops_(model, input=dummy_rays_o, count_adds=False, rays_d=dummy_rays_d)
+    print(f'Model complexity per pixel: FLOPs {n_flops/1e6:.4f}M, Params {n_params/1e6:.4f}M')
 
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
 
@@ -712,7 +731,7 @@ def train():
     # Create nerf model
     render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args, near, far)
     new_render_func = False
-    if args.model_name in ['nerf_v2']:
+    if args.model_name in ['nerf_v2', 'nerf_v3']:
         new_render_func = True
     print(f'Created model {args.model_name}')
 
@@ -1023,6 +1042,11 @@ def train():
                         loss_line.update('loss_perm_invar (*%s)' % args.lw_perm_invar, loss_perm_invar.item(), '.10f')
                     else:
                         rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
+            
+            elif args.model_name in ['nerf_v3']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                rgb = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
             
             # rgb loss
             loss_rgb = img2mse(rgb, target_s)

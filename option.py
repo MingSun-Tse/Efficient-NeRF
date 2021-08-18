@@ -117,7 +117,7 @@ parser.add_argument('--screen_print', action="store_true")
 parser.add_argument('--cache_ignore', type=str, default='')
 
 # @mst: related to nerf_v2
-parser.add_argument('--model_name', type=str, default='nerf_v2', choices=['nerf', 'nerf_v2'])
+parser.add_argument('--model_name', type=str, default='nerf_v2', choices=['nerf', 'nerf_v2', 'nerf_v3'])
 parser.add_argument('--N_iters', type=int, default=200000)
 parser.add_argument('--skips', type=str, default='4')
 parser.add_argument('--D_head', type=int, default=4)
@@ -175,6 +175,11 @@ parser.add_argument('--hard_mul', type=float, default=1,
         help='hard_mul * batch_size is the size of hard ray pool')
 parser.add_argument('--group_l2', type=float, default=0,
         help='group_l2 regularization factor')
+parser.add_argument('--pruner', type=str, default='',
+        help='name of pruner')
+parser.add_argument('--stage_pr', type=str, default='',
+        help='to assign layer-wise pruning ratio')
+parser.add_argument('--use_residual', action='store_true')
 args = parser.parse_args()
 
 if args.video_tag == '':
@@ -198,3 +203,13 @@ if args.hard_ratio != '':
         args.hard_ratio = float(args.hard_ratio)
     else:
         args.hard_ratio = [float(x) for x in args.hard_ratio.split(',')]
+
+# some default args to keep compatibility
+args.wg = 'filter'
+args.pick_pruned = 'min'
+args.base_pr_model = ''
+args.index_layer = 'name_matching'
+args.skip_layers = ''
+args.previous_layers = ''
+args.arch = 'mlp'
+
