@@ -257,7 +257,7 @@ def create_nerf(args, near, far):
             print(f'Use orth init. Activation func: {act_func}')
 
     elif args.model_name in ['nerf_v3']:
-        model = NeRF_v3(args, near, far, print=netprint).to(device)
+        model = NeRF_v3(args, near, far).to(device)
         grad_vars += list(model.parameters())
 
     # in KD, there is a pretrained teacher
@@ -321,11 +321,12 @@ def create_nerf(args, near, far):
     if model_fine is not None:
         model_fine = torch.nn.DataParallel(model_fine)
 
-    # pruning
-    if args.model_name == 'nerf_v2' and args.pruner:
+    # pruning, before 'render_kwargs_train'
+    if args.model_name in ['nerf_v2', 'nerf_v3'] and args.pruner:
         class passer: pass
         pruner = pruner_dict[args.pruner].Pruner(model, args, logger, passer)
         model = pruner.prune()
+        print('Got just pruned model.')
 
     # set up training args
     render_kwargs_train = {
@@ -1036,12 +1037,7 @@ def train():
                 if args.directly_predict_rgb:
                     rgb, *_ = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
                 else:
-                    if args.n_perm_invar > 0:
-                        rgb, *_, raw, pts, viewdirs, loss_perm_invar = model.perm_invar_forward(rays_o, rays_d, global_step=global_step, perturb=perturb)
-                        loss += loss_perm_invar * args.lw_perm_invar
-                        loss_line.update('loss_perm_invar (*%s)' % args.lw_perm_invar, loss_perm_invar.item(), '.10f')
-                    else:
-                        rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
+                    rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
             
             elif args.model_name in ['nerf_v3']:
                 model = render_kwargs_train['network_fn']

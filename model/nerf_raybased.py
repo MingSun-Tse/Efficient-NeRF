@@ -4,6 +4,7 @@ torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn 
 import torch.nn.functional as F
 import numpy as np, time, math
+import dill
 
 # TODO: remove this dependency
 from torchsearchsorted import searchsorted
@@ -274,7 +275,7 @@ class NeRF_v2(nn.Module):
                                                                     embeddirs_fn=self.embeddirs_fn,
                                                                     netchunk=args.netchunk)
 
-    def forward(self, rays_o, rays_d, global_step=-1, perturb=0, perm_invar=False):
+    def forward(self, rays_o, rays_d, global_step=-1, perturb=0):
         n_ray = rays_o.size(0)
         n_sample = self.args.n_sample_per_ray
 
@@ -435,16 +436,14 @@ class EDSR(nn.Module):
 class NeRF_v3(nn.Module):
     '''New idea: one forward to get multi-outputs.
     '''
-    def __init__(self, args, near, far, print=print):
+    def __init__(self, args, near, far):
         super(NeRF_v3, self).__init__()
         self.args = args
         self.near = near
         self.far = far
-        D, W = args.netdepth, args.netwidth
-        self.skips = [int(x) for x in args.skips.split(',')] if args.skips else []
-        self.print = print
         assert args.n_sample_per_ray >= 1
         n_sample = args.n_sample_per_ray
+        D, W = args.netdepth, args.netwidth
 
         # positional embedding function
         self.embed_fn, input_ch = get_embedder(args.multires, args.i_embed)

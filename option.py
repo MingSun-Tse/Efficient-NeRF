@@ -1,7 +1,7 @@
 from random import choice
 from numpy.random import default_rng
 import configargparse
-from utils import check_path
+from utils import check_path, strdict_to_dict
 
 parser = configargparse.ArgumentParser()
 parser.add_argument('--config', is_config_file=True, 
@@ -155,7 +155,7 @@ parser.add_argument('--kd_poses_update', type=str, default='once')
 parser.add_argument('--datadir_kd', type=str, default='')
 parser.add_argument('--create_data_chunk', type=int, default=100)
 parser.add_argument('--create_data', type=str, default='spiral_evenly_spaced')
-parser.add_argument('--i_update_data', type=int, default=500,
+parser.add_argument('--i_update_data', type=int, default=1000000000,
         help='interval of updating training data (changing pseudo data)')
 parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0.9')
 parser.add_argument('--init', type=str, default='default', choices=['default', 'orth'])
@@ -179,6 +179,7 @@ parser.add_argument('--pruner', type=str, default='',
         help='name of pruner')
 parser.add_argument('--stage_pr', type=str, default='',
         help='to assign layer-wise pruning ratio')
+parser.add_argument('--previous_layers', type=str, default='')
 parser.add_argument('--use_residual', action='store_true')
 parser.add_argument('--linear_tail', action='store_true')
 args = parser.parse_args()
@@ -208,9 +209,10 @@ if args.hard_ratio != '':
 # some default args to keep compatibility
 args.wg = 'filter'
 args.pick_pruned = 'min'
-args.base_pr_model = ''
+args.base_pr_model = None
 args.index_layer = 'name_matching'
 args.skip_layers = ''
 args.previous_layers = ''
 args.arch = 'mlp'
-
+args.stage_pr = strdict_to_dict(args.stage_pr, float)
+args.orth_reg_iter = -1
