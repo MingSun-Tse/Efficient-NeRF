@@ -182,6 +182,7 @@ parser.add_argument('--stage_pr', type=str, default='',
 parser.add_argument('--previous_layers', type=str, default='')
 parser.add_argument('--use_residual', action='store_true')
 parser.add_argument('--linear_tail', action='store_true')
+parser.add_argument('--layerwise_netwidths', type=str, default='')
 args = parser.parse_args()
 
 if args.video_tag == '':
