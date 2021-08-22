@@ -7,7 +7,7 @@ import numpy as np, time, math
 import dill
 
 # TODO: remove this dependency
-from torchsearchsorted import searchsorted
+# from torchsearchsorted import searchsorted # not used by raybased nerf, commented because it is not compiled successfully using docker
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Misc
