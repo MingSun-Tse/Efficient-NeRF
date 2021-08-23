@@ -169,7 +169,7 @@ parser.add_argument('--freeze_pretrained', action='store_true')
 parser.add_argument('--focal_scale', type=float, default=1.)
 parser.add_argument('--data_mode', type=str, default='images', choices=['images', 'rays'],
         help='which data is used in training, sample rays from images or directly load rays')
-parser.add_argument('--num_workers', type=int, default=4, 
+parser.add_argument('--num_workers', type=int, default=8, 
         help='#cpus when loading data')
 parser.add_argument('--hard_ratio', type=str, default='',
         help='hard rays ratio in a batch; seperated by comma')
