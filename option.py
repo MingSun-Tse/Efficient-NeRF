@@ -46,6 +46,8 @@ parser.add_argument("--N_importance", type=int, default=0,
                     help='number of additional fine samples per ray')
 parser.add_argument("--perturb", type=float, default=1.,
                     help='set to 0. for no jitter, 1. for jitter')
+parser.add_argument("--perturb_test", type=float, default=0,
+                    help='set to 0. for no jitter, 1. for jitter')
 parser.add_argument("--use_viewdirs", action='store_true', 
                     help='use full 5D input instead of 3D')
 parser.add_argument("--i_embed", type=int, default=0, 
@@ -183,6 +185,8 @@ parser.add_argument('--previous_layers', type=str, default='')
 parser.add_argument('--use_residual', action='store_true')
 parser.add_argument('--linear_tail', action='store_true')
 parser.add_argument('--layerwise_netwidths', type=str, default='')
+parser.add_argument('--render_iters', type=int, default=1,
+        help='the number of forwards when rendering one image') 
 args = parser.parse_args()
 
 if args.video_tag == '':

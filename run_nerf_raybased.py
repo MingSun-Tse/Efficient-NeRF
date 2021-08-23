@@ -153,7 +153,33 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         H = int(H / render_factor)
         W = int(W / render_factor)
         focal = focal / render_factor
+
+    # --------------------------------------------------------------------------------------
+    # Improve parallism
+    # # get all rays
+    # rays_o, rays_d = [], []
+    # n_pose = len(render_poses)
+    # for i, c2w in enumerate(render_poses):
+    #     rays_o_, rays_d_ = get_rays(H, W, focal, c2w[:3,:4]) # rays_o shape: # [H, W, 3]
+    #     rays_o += rays_o_.view(-1, 3)
+    #     rays_d += rays_d_.view(-1, 3)
+    # rays_o = torch.cat(rays_o, dim=0).cuda() # [n_pose*H*W, 3]
+    # rays_d = torch.cat(rays_d, dim=0).cuda() # [n_pose*H*W, 3]
     
+    # model = render_kwargs['network_fn'].cuda()
+    # perturb = render_kwargs['perturb']
+    # rgb, disp = [], []
+    # t0 = time.time()
+    # for ix in range(0, rays_o.shape[0], chunk):
+    #     with torch.no_grad():
+    #         rgb_, disp_, *_ = model(rays_o[ix: ix+chunk], rays_d[ix: ix+chunk], perturb=perturb)
+    #         rgb += [rgb_]
+    #         disp += [disp_]
+    #     print(f'{time.time() - t0}s')
+    # rgbs, disps = torch.cat(rgb, dim=0), torch.cat(disp, dim=0)
+    # rgbs, disps = rgb.view(n_pose, H, W, 3), disp.view(n_pose, H, W, 3)
+    # --------------------------------------------------------------------------------------
+
     rgbs, disps, errors = [], [], []
     for i, c2w in enumerate(render_poses):
         t0 = time.time()
@@ -164,12 +190,19 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3)
             
             # batchify
-            rgb, disp = [], []
-            for ix in range(0, rays_o.shape[0], chunk):
-                rgb_, disp_, *_ = model(rays_o[ix: ix+chunk], rays_d[ix: ix+chunk], perturb=perturb)
-                rgb += [rgb_]
-                disp += [disp_]
-            rgb, disp = torch.cat(rgb, dim=0), torch.cat(disp, dim=0)
+            rgb_sum = disp_sum = 0
+            for _ in range(args.render_iters):
+                rgb, disp = [], []
+                for ix in range(0, rays_o.shape[0], chunk):
+                    with torch.no_grad():
+                        rgb_, disp_, *_ = model(rays_o[ix: ix+chunk], rays_d[ix: ix+chunk], perturb=perturb)
+                        rgb += [rgb_]
+                        disp += [disp_]
+                rgb, disp = torch.cat(rgb, dim=0), torch.cat(disp, dim=0)
+                rgb_sum += rgb
+                disp_sum += disp
+            rgb = rgb_sum / args.render_iters
+            disp = disp_sum / args.render_iters
             
             # enhance
             if 'network_enhance' in render_kwargs:
@@ -182,6 +215,8 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         else: # original implementation
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)    
         
+        if i < 10:
+            print(f'Rendering one frame, time: {time.time()-t0:.4f}s')
         rgbs.append(rgb)
         disps.append(disp)
 
@@ -203,8 +238,8 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         errors = torch.stack(errors, dim=0)
     else:
         test_loss, test_psnr, errors = None, None, None
-        
     return rgbs, disps, test_loss, test_psnr, errors
+
 
 def create_nerf(args, near, far):
     """Instantiate NeRF's MLP model.
@@ -349,7 +384,7 @@ def create_nerf(args, near, far):
 
     # set up testing args
     render_kwargs_test = {k : render_kwargs_train[k] for k in render_kwargs_train}
-    render_kwargs_test['perturb'] = False
+    render_kwargs_test['perturb'] = args.perturb_test
     render_kwargs_test['raw_noise_std'] = 0.
 
     if args.teacher_ckpt:
