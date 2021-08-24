@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # from torch.utils.tensorboard import SummaryWriter
-from model.nerf_raybased import NeRF, NeRF_v2, NeRF_v3
+from model.nerf_raybased import NeRF, NeRF_v2, NeRF_v3, NeRF_v4
 from model.enhance_cnn import EDSR
 from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder
 from run_nerf_raybased_helpers import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2, get_selected_coords
@@ -203,7 +203,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 disp_sum += disp
             rgb = rgb_sum / args.render_iters
             disp = disp_sum / args.render_iters
-            
+
             # enhance
             if 'network_enhance' in render_kwargs:
                 model_enhance = render_kwargs['network_enhance']
@@ -293,6 +293,10 @@ def create_nerf(args, near, far):
 
     elif args.model_name in ['nerf_v3']:
         model = NeRF_v3(args, near, far).to(device)
+        grad_vars += list(model.parameters())
+
+    elif args.model_name in ['nerf_v4']:
+        model = NeRF_v4(args, near, far).to(device)
         grad_vars += list(model.parameters())
 
     # in KD, there is a pretrained teacher
@@ -411,8 +415,13 @@ def create_nerf(args, near, far):
         dummy_rays_o = torch.randn(1, 3).to(device)
         dummy_rays_d = torch.randn(1, 3).to(device)
         n_flops = get_n_flops_(model, input=dummy_rays_o, count_adds=False, rays_d=dummy_rays_d)
-    print(f'Model complexity per pixel: FLOPs {n_flops/1e6:.4f}M, Params {n_params/1e6:.4f}M')
     
+    elif args.model_name in ['nerf_v4']:
+        dummy_rays_o = torch.randn(1, 3).to(device)
+        dummy_rays_d = torch.randn(1, 3).to(device)
+        n_flops = get_n_flops_(model, input=dummy_rays_o, count_adds=False, rays_d=dummy_rays_d, rays_d2=dummy_rays_d)
+
+    print(f'Model complexity per pixel: FLOPs {n_flops/1e6:.4f}M, Params {n_params/1e6:.4f}M')
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
 
 
@@ -669,7 +678,10 @@ def get_dataloader(dataset_type, datadir, pseudo_ratio=0.5):
                     sampler=InfiniteSamplerWrapper(len(trainset))
             )
         elif args.data_mode in ['rays']:
-            trainset = BlenderDataset_v2(datadir, pseudo_ratio)
+            dim_dir = dim_rgb = 3
+            if args.model_name in ['nerf_v4']:
+                dim_dir = dim_rgb = 6
+            trainset = BlenderDataset_v2(datadir, pseudo_ratio, dim_dir=dim_dir, dim_rgb=dim_rgb)
             trainloader = torch.utils.data.DataLoader(dataset=trainset, 
                     batch_size=args.N_rand,
                     num_workers=args.num_workers,
@@ -768,7 +780,7 @@ def train():
     # Create nerf model
     render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args, near, far)
     new_render_func = False
-    if args.model_name in ['nerf_v2', 'nerf_v3']:
+    if args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v4']:
         new_render_func = True
     print(f'Created model {args.model_name}')
 
@@ -967,6 +979,7 @@ def train():
             if args.datadir_kd:
                 if args.data_mode in ['images']:
                     if i % args.i_update_data == 0: # update trainloader, possibly load more data
+                        raise NotImplementedError # deprecated, will be removed
                         if args.dataset_type == 'blender':
                             t_ = time.time()
                             pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
@@ -993,6 +1006,7 @@ def train():
                 
                 elif args.data_mode in ['rays']:
                     if i % args.i_update_data == 0: # update trainloader, possibly load more data
+                        raise NotImplementedError # deprecated, will be removed
                         if args.dataset_type == 'blender':
                             t_ = time.time()
                             trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
@@ -1032,6 +1046,9 @@ def train():
                     rays_o = rays_o.view(-1, 3)
                     rays_d = rays_d.view(-1, 3)
                     target_s = target_s.view(-1, 3)
+                    if args.model_name in ['nerf_v4']: # in nerf_v4, load two rays each time
+                        rays_d, rays_d2 = rays_d[:, :3], rays_d[:, 3:]
+                        target_s, target_s2 = target_s[:, :3], target_s[:, 3:]
             
             batch_size = rays_o.shape[0]
             if args.hard_ratio:
@@ -1049,13 +1066,6 @@ def train():
                 rays_o   = torch.cat([rays_o,   picked_hard_rays[:,  :3]], dim=0)
                 rays_d   = torch.cat([rays_d,   picked_hard_rays[:, 3:6]], dim=0)
                 target_s = torch.cat([target_s, picked_hard_rays[:, 6: ]], dim=0)
-                # save
-                '''
-                hard_rays = hard_rays[:batch_size]
-                n_hard_npy += 1
-                save_path = f'{datadir_kd_new}/hard_{n_hard_npy}.npy'
-                np.save(save_path, hard_rays)
-                '''                    
             
             # forward and get loss
             loss = 0
@@ -1079,6 +1089,11 @@ def train():
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
                 rgb, *_ = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
+
+            elif args.model_name in ['nerf_v4']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                rgb, rgb2 = model(rays_o, rays_d, rays_d2, scale=args.forward_scale, global_step=global_step, perturb=perturb)
             
             # rgb loss
             loss_rgb = img2mse(rgb, target_s)
@@ -1086,6 +1101,12 @@ def train():
             loss_line.update('psnr', psnr.item(), '.4f')
             if not (args.enhance_cnn and args.freeze_pretrained):
                 loss += loss_rgb
+            
+            if args.model_name in ['nerf_v4']:
+                loss_rgb2 = img2mse(rgb2, target_s2)
+                psnr2 = mse2psnr(loss_rgb2)
+                loss_line.update('psnr2', psnr2.item(), '.4f')
+                loss += loss_rgb2
 
             # enhance cnn rgb loss
             if args.enhance_cnn:

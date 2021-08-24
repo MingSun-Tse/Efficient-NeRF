@@ -222,25 +222,17 @@ class BlenderDataset(Dataset):
 class BlenderDataset_v2(Dataset):
     '''Load data of ray origins and directions. This is the most straight way.
     '''
-    def __init__(self, datadir, pseudo_ratio=0.5):
+    def __init__(self, datadir, pseudo_ratio=0.5, dim_dir=3, dim_rgb=3):
         self.datadir = datadir
         all_splits = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('.npy')]
-        
-        # # take out the small-size files
-        # all_splits.sort(key=lambda f: os.stat(f).st_size) # ascending order
-        # normal_size = os.stat(all_splits[-1]).st_size
-        # for i in range(len(all_splits)):
-        #     if os.stat(all_splits[i]).st_size == normal_size:
-        #         break
-        # self.all_splits = all_splits[i:]
-        
         self.all_splits = all_splits
         print(f'Load data done. #All files: {len(self.all_splits)}')
 
     def __getitem__(self, index):
         d = np.load(self.all_splits[index])
         d = torch.Tensor(d)
-        return d[:,:3], d[:,3:6], d[:,6:9]
+        return d[:, :3], d[:, 3:3+dim_dir], d[:, 3+dim_dir:3+dim_dir+dim_rgb]
+    
     def __len__(self):
         return len(self.all_splits)
 

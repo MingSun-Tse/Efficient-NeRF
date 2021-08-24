@@ -187,6 +187,8 @@ parser.add_argument('--linear_tail', action='store_true')
 parser.add_argument('--layerwise_netwidths', type=str, default='')
 parser.add_argument('--render_iters', type=int, default=1,
         help='the number of forwards when rendering one image') 
+parser.add_argument('--forward_scale', type=float, default=1.
+        help='used in nerf_v4')
 args = parser.parse_args()
 
 if args.video_tag == '':

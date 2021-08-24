@@ -532,7 +532,7 @@ class NeRF_v3(nn.Module):
         return rgb, rgb
 
 class NeRF_v4(nn.Module):
-    '''Move view directions to the very first input layer and no skip layers.
+    '''Spatial sharing
     '''
     def __init__(self, args, near, far):
         super(NeRF_v4, self).__init__()
@@ -560,22 +560,32 @@ class NeRF_v4(nn.Module):
 
         # head
         self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU()])
-        input_dim = Ws[0]
+        feat_dim = Ws[0]
         
         # body
         body = []
         for i in range(1, D - 1):
-            body += [nn.Linear(input_dim, Ws[i]), nn.ReLU()]
-            input_dim = Ws[i]
+            body += [nn.Linear(feat_dim, Ws[i])] # not add relu here, will be added during forward
+            feat_dim = Ws[i]
         self.body = nn.Sequential(*body)
         
         # tail
         if args.linear_tail:
-            self.tail = nn.Linear(input_dim, 3)
+            self.tail = nn.Linear(feat_dim, 3)
         else:
-            self.tail = nn.Sequential(*[nn.Linear(input_dim, 3), nn.Sigmoid()])
+            self.tail = nn.Sequential(*[nn.Linear(feat_dim, 3), nn.Sigmoid()])
+        
+        # branch net to predict neighbor pixels
+        branch_input_dim = Ws[args.branch_loc] + input_dim
+        branch = [nn.Linear(branch_input_dim, args.branchwidth), nn.ReLU()] # 1st layer
+        for _ in range(args.branchdepth - 2):
+            branch += [nn.Linear(args.branchwidth, args.branchwidth), nn.ReLU()]
+        branch += [nn.Linear(args.branchwidth, 3)] # last layer, predict the residual of rgb, so 3
+        self.branch = nn.Sequential(*branch)
 
-    def forward(self, rays_o, rays_d, global_step=-1, perturb=0):
+    def forward(self, rays_o, rays_d, rays_d2, scale=1, global_step=-1, perturb=0):
+        '''rays_d2: the second ray
+        '''
         n_ray = rays_o.size(0)
         n_sample = self.args.n_sample_per_ray
 
@@ -594,13 +604,17 @@ class NeRF_v4(nn.Module):
         
             # get sample coordinates
             pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, 3]
+            pts2 = rays_o[..., None, :] + rays_d2[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, 3]
 
             # positional embedding
             embedded_pts = self.embed_fn(pts.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
             embedded_pts = embedded_pts.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray*63]
+            embedded_pts2 = self.embed_fn(pts2.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
+            embedded_pts2 = embedded_pts2.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray*63]
 
             # pose embedding
             if self.args.use_viewdirs:
+                raise NotImplementedError
                 # provide ray directions as input
                 viewdirs = rays_d
                 # if c2w_staticcam is not None:
@@ -615,16 +629,25 @@ class NeRF_v4(nn.Module):
                 embedded_pts = torch.cat([embedded_pts, embedded_dirs], dim=-1)
         
         else: # n_sample = 1
+            raise NotImplementedError
             embedded_pts = self.embed_fn(rays_o) # [n_ray, 63]
             if self.args.use_viewdirs:
                 embedded_dirs = self.embeddirs_fn(rays_d / rays_d.norm(dim=-1, keepdim=True)) # [n_ray, 27]
                 embedded_pts = torch.cat([embedded_pts, embedded_dirs], dim=-1)
 
-        # forward
-        h = self.head(embedded_pts)
-        if self.args.use_residual:
-            h = self.body(h) + h
-        else:
-            h = self.body(h)
+        # main forward
+        head_output = self.head(embedded_pts)
+        h = head_output
+        for ix, layer in enumerate(self.body):
+            h = F.relu(layer(h))
+            if ix + 1 == self.args.branch_loc:
+                branch_input = h
+        h = h + x if self.args.use_residual else h
         rgb = self.tail(h)
-        return rgb, rgb
+
+        # branch forward
+        branch_input = torch.cat([branch_input, embedded_pts2], dim=0)
+        branch_input = (rays_d2 - rays_d).norm(dim=-1) * branch_input * scale
+        branch_output = self.branch(branch_input)
+        rgb2 = branch_output + rgb
+        return rgb, rgb2
