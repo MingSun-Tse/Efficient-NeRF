@@ -476,13 +476,17 @@ class NeRF_v3(nn.Module):
             self.tail = nn.Linear(input_dim, 3)
         else:
             self.tail = nn.Sequential(*[nn.Linear(input_dim, 3), nn.Sigmoid()])
+        
+        self.t_vals = torch.linspace(0., 1., steps=n_sample).to(device)
 
     def forward(self, rays_o, rays_d, global_step=-1, perturb=0):
         n_ray = rays_o.size(0)
         n_sample = self.args.n_sample_per_ray
 
+        t0 = time.time()
         if n_sample > 1:
-            t_vals = torch.linspace(0., 1., steps=n_sample).to(device)
+            t_vals = self.t_vals
+            print(f'Inside model forward [00] {time.time() - t0:.4f}s -- after getting t_vals')
             t_vals = t_vals[None, :].expand(n_ray, n_sample)
             z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
             if perturb > 0.:
@@ -493,7 +497,7 @@ class NeRF_v3(nn.Module):
                 # stratified samples in those intervals
                 t_rand = torch.rand(z_vals.shape).to(device) # uniform dist [0, 1)
                 z_vals = lower + (upper - lower) * t_rand
-        
+
             # get sample coordinates
             pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, 3]
 
@@ -501,6 +505,7 @@ class NeRF_v3(nn.Module):
             embedded_pts = self.embed_fn(pts.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
             embedded_pts = embedded_pts.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray*63]
 
+            print(f'Inside model forward [01] {time.time() - t0:.4f}s -- after positional encoding of origins')
             # pose embedding
             if self.args.use_viewdirs:
                 # provide ray directions as input
@@ -522,18 +527,17 @@ class NeRF_v3(nn.Module):
                 embedded_dirs = self.embeddirs_fn(rays_d / rays_d.norm(dim=-1, keepdim=True)) # [n_ray, 27]
                 embedded_pts = torch.cat([embedded_pts, embedded_dirs], dim=-1)
 
-        # forward
-        h = self.head(embedded_pts)
-        if self.args.use_residual:
-            h = self.body(h) + h
-        else:
-            h = self.body(h)
-        rgb = self.tail(h)
+        print(f'Inside model forward [02] {time.time() - t0:.4f}s -- after positional encoding of directions')
+        # network forward
+        # h = self.head(embedded_pts)
+        # h = self.body(h) + h if self.args.use_residual else self.body(h)
+        # rgb = self.tail(h)
+        rgb = torch.ones(n_ray, 3)
+        print(f'Inside model forward [03] {time.time() - t0:.4f}s -- after network forward')
         return rgb, rgb
 
 class NeRF_v4(nn.Module):
-    '''Spatial sharing
-    '''
+    '''Spatial sharing'''
     def __init__(self, args, near, far):
         super(NeRF_v4, self).__init__()
         self.args = args
@@ -583,9 +587,12 @@ class NeRF_v4(nn.Module):
         branch += [nn.Linear(args.branchwidth, 3)] # last layer, predict the residual of rgb, so 3
         self.branch = nn.Sequential(*branch)
 
-    def forward(self, rays_o, rays_d, rays_d2, scale=1, global_step=-1, perturb=0):
+    def forward(self, rays_o, rays_d, rays_d2, scale=1, global_step=-1, perturb=0, test=False):
         '''rays_d2: the second ray
         '''
+        if test:
+            return self._test_forward(rays_o, rays_d, scale, perturb)
+
         n_ray = rays_o.size(0)
         n_sample = self.args.n_sample_per_ray
 
@@ -608,32 +615,16 @@ class NeRF_v4(nn.Module):
 
             # positional embedding
             embedded_pts = self.embed_fn(pts.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
-            embedded_pts = embedded_pts.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray*63]
+            embedded_pts = embedded_pts.view(n_ray, -1) # [n_ray, n_sample_per_ray*63]
             embedded_pts2 = self.embed_fn(pts2.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
-            embedded_pts2 = embedded_pts2.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray*63]
+            embedded_pts2 = embedded_pts2.view(n_ray, -1) # [n_ray, n_sample_per_ray*63]
 
             # pose embedding
             if self.args.use_viewdirs:
                 raise NotImplementedError
-                # provide ray directions as input
-                viewdirs = rays_d
-                # if c2w_staticcam is not None:
-                #     # special case to visualize effect of viewdirs
-                #     rays_o, rays_d = get_rays(H, W, focal, c2w_staticcam)
-                viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True) # @mst: 'rays_d' is real-world data, needs normalization.
-                viewdirs = torch.reshape(viewdirs, [-1, 3]).float() # [n_ray, 3]
-                dirs = viewdirs[:, None].expand(pts.shape) # [n_ray, 3] -> [n_ray, n_sample, 3]
-                dirs = torch.reshape(dirs, (-1, 3)) # [n_ray * n_sample, 3]
-                embedded_dirs = self.embeddirs_fn(dirs) # [n_ray * n_sample, 27]
-                embedded_dirs = embedded_dirs.view(rays_o.size(0), -1) # [n_ray, n_sample * 27]
-                embedded_pts = torch.cat([embedded_pts, embedded_dirs], dim=-1)
         
         else: # n_sample = 1
             raise NotImplementedError
-            embedded_pts = self.embed_fn(rays_o) # [n_ray, 63]
-            if self.args.use_viewdirs:
-                embedded_dirs = self.embeddirs_fn(rays_d / rays_d.norm(dim=-1, keepdim=True)) # [n_ray, 27]
-                embedded_pts = torch.cat([embedded_pts, embedded_dirs], dim=-1)
 
         # main forward
         head_output = self.head(embedded_pts)
@@ -642,12 +633,111 @@ class NeRF_v4(nn.Module):
             h = F.relu(layer(h))
             if ix + 1 == self.args.branch_loc:
                 branch_input = h
-        h = h + x if self.args.use_residual else h
+        h = h + head_output if self.args.use_residual else h
         rgb = self.tail(h)
 
         # branch forward
-        branch_input = torch.cat([branch_input, embedded_pts2], dim=0)
-        branch_input = (rays_d2 - rays_d).norm(dim=-1) * branch_input * scale
+        branch_input = torch.cat([branch_input, embedded_pts2], dim=-1)
+        branch_input = (rays_d2 - rays_d).norm(dim=-1, keepdim=True) * branch_input * scale
         branch_output = self.branch(branch_input)
         rgb2 = branch_output + rgb
         return rgb, rgb2
+    
+    def _test_forward(self, rays_o, rays_d, scale, perturb):
+        '''rays_o: [n_ray, n_pixel*3], rays_d: [n_ray, n_pixel*3], n_pixel is the num of neibour pixels sharing computation
+        '''
+        n_ray = rays_o.shape[0]
+        rays_d, *rays_d_others = torch.split(rays_d, 3, dim=-1)
+        rays_o = rays_o[:, :3] # all the pixels share the same origin, so only using the first 3 is still the same
+
+        n_sample = self.args.n_sample_per_ray
+        t_vals = torch.linspace(0., 1., steps=n_sample).to(device)
+        t_vals = t_vals[None, :].expand(n_ray, n_sample)
+        z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
+        if perturb > 0.:
+            # get intervals between samples
+            mids = .5 * (z_vals[...,1:] + z_vals[...,:-1])
+            upper = torch.cat([mids, z_vals[...,-1:]], -1)
+            lower = torch.cat([z_vals[...,:1], mids], -1)
+            # stratified samples in those intervals
+            t_rand = torch.rand(z_vals.shape).to(device) # uniform dist [0, 1)
+            z_vals = lower + (upper - lower) * t_rand
+    
+        # get sample coordinates
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, 3]
+        
+        # positional embedding
+        embedded_pts = self.embed_fn(pts.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
+        embedded_pts = embedded_pts.view(n_ray, -1) # [n_ray, n_sample_per_ray*63]
+
+        # main forward
+        head_output = self.head(embedded_pts)
+        h = head_output
+        for ix, layer in enumerate(self.body):
+            h = F.relu(layer(h))
+            if ix + 1 == self.args.branch_loc:
+                branch_input = h
+        h = h + head_output if self.args.use_residual else h
+        rgb = self.tail(h)
+
+        rgb_others = []
+        for rd in rays_d_others: # rays_d_others: [[n_ray, 3], [n_ray, 3], ...]
+            pts2 = rays_o[..., None, :] + rd[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, 3]
+            embedded_pts2 = self.embed_fn(pts2.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
+            embedded_pts2 = embedded_pts2.view(n_ray, -1) # [n_ray, n_sample_per_ray*63]
+
+            # branch forward
+            branch_input = torch.cat([branch_input, embedded_pts2], dim=-1) # [n_ray, W], [n_ray, 63] -> [n_ray, W+63]
+            branch_input = (rd - rays_d).norm(dim=-1, keepdim=True) * branch_input * scale # [n_ray, 1] * [n_ray, W+63] * scalar -> [n_ray, W+63]
+            branch_output = self.branch(branch_input) # [n_ray, 3]
+            rgb2 = branch_output + rgb # [n_ray, 3]
+            rgb_others += [rgb2] # [[n_ray, 3], [n_ray, 3], ...]
+        rgbs = [rgb] + rgb_others # [[n_ray, 3], [n_ray, 3], ...]
+        rgbs = torch.cat(rgbs, dim=-1) # [n_ray, n_pixel*3]
+        return rgbs
+
+class NeRF_v5(nn.Module):
+    '''Use 1x1 conv to impl. MLP in nerf'''
+    def __init__(self, args, near, far):
+        super(NeRF_v5, self).__init__()
+        self.args = args
+        self.near = near
+        self.far = far
+        assert args.n_sample_per_ray >= 1
+        n_sample = args.n_sample_per_ray
+        D, W = args.netdepth, args.netwidth
+
+        # positional embedding function
+        self.embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
+        if args.use_viewdirs:
+            self.embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
+
+        # network width
+        if args.layerwise_netwidths:
+            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
+            print('Layer-wise widths are given. Overwrite args.netwidth')
+        else:
+            Ws = [W] * (D - 1) + [3]
+        
+        input_dim = input_ch + input_ch_views if args.use_viewdirs else input_ch
+        input_dim *= n_sample
+
+        # head
+        self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=1), nn.ReLU()])
+        
+        # body
+        body = []
+        for i in range(1, D - 1):
+            body += [nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=1), nn.ReLU()]
+        self.body = nn.Sequential(*body)
+        
+        # tail
+        if args.linear_tail:
+            self.tail = nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=1)
+        else:
+            self.tail = nn.Sequential(*[nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=1), nn.Sigmoid()])
+        
+    def forward(self, x):
+        x = self.head(x)
+        x = self.body(x) + x if self.args.use_residual else self.body(x)
+        return self.tail(x)

@@ -119,7 +119,7 @@ parser.add_argument('--screen_print', action="store_true")
 parser.add_argument('--cache_ignore', type=str, default='')
 
 # @mst: related to nerf_v2
-parser.add_argument('--model_name', type=str, default='nerf_v2', choices=['nerf', 'nerf_v2', 'nerf_v3'])
+parser.add_argument('--model_name', type=str, default='nerf_v2', choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v4', 'nerf_v5'])
 parser.add_argument('--N_iters', type=int, default=200000)
 parser.add_argument('--skips', type=str, default='4')
 parser.add_argument('--D_head', type=int, default=4)
@@ -187,8 +187,12 @@ parser.add_argument('--linear_tail', action='store_true')
 parser.add_argument('--layerwise_netwidths', type=str, default='')
 parser.add_argument('--render_iters', type=int, default=1,
         help='the number of forwards when rendering one image') 
-parser.add_argument('--forward_scale', type=float, default=1.
+parser.add_argument('--forward_scale', type=float, default=1.,
         help='used in nerf_v4')
+parser.add_argument('--branch_loc', type=int, default=9)
+parser.add_argument('--branchwidth', type=int, default=256)
+parser.add_argument('--branchdepth', type=int, default=3)
+parser.add_argument('--num_shared_pixels', type=int, default=4)
 args = parser.parse_args()
 
 if args.video_tag == '':

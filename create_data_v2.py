@@ -1,4 +1,4 @@
-import os, sys, copy
+import os, sys
 import numpy as np
 import imageio, shutil
 import time
@@ -225,10 +225,6 @@ def create_nerf(args, near, far):
                                                                     netchunk=args.netchunk)
     # start iteration
     start = 0
-
-    # use DataParallel
-    teacher_fn = torch.nn.DataParallel(teacher_fn)
-    teacher_fine = torch.nn.DataParallel(teacher_fine)
 
     # set up training args
     render_kwargs_train = {
@@ -658,85 +654,6 @@ def train():
                     np.save(save_path, d)
                 print(f'[{i}/{args.n_pose_kd}] Saved data at "{datadir_kd_new}"')
                 data = [] # reset
-
-    elif args.create_data in ['rand_tworays']:
-        # set up data directory
-        if os.path.exists(datadir_kd_new):
-            if os.path.isfile(datadir_kd_new): 
-                os.remove(datadir_kd_new)
-            else:
-                shutil.rmtree(datadir_kd_new)
-        os.makedirs(datadir_kd_new)
-        print('Set up new data directory, done!')
-        
-        # set up model
-        render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
-        render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
-        render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
-        render_kwargs_.pop('teacher_fn')
-        render_kwargs_.pop('teacher_fine')
-
-        # run
-        i_save, split_size = 100, 4096 # every 4096 rays will make up a .npy file
-        data, t0, split = [], time.time(), 0
-        timer = Timer(args.n_pose_kd)
-        for i in range(1, args.n_pose_kd + 1):
-            pose = get_rand_pose()
-            focal_ = focal * (np.random.rand() + 1) # scale focal by [1, 2)
-            rays_o, rays_d = get_rays1(H, W, focal_, pose) # rays_o, rays_d shape: [H, W, 3]
-            batch_rays = torch.stack([rays_o, rays_d], dim=0) # [2, H, W, 3]
-            rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays, # when batch_rays are given, it will not create rays inside 'render'
-                                            verbose=False, retraw=False,
-                                            **render_kwargs_)
-            
-            # for each pixel, get its neighbor pixel, add it to the data
-            offset = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]]
-            rays_d2 = copy.deepcopy(rays_d)
-            rgb2 = copy.deepcopy(rgb)
-            H, W = rays_o.shape[0], rays_o.shape[1]
-            for h in range(H):
-                for w in range(W):
-                    while True:
-                        offset_h, offset_w = offset[np.random.permutation(len(offset))[0]]
-                        neighbor_h = h + offset_h
-                        neighbor_w = w + offset_w
-                        if 0 <= neighbor_h < H and 0 <= neighbor_w < W:
-                            break
-                    rays_d2[h, w] = rays_d[neighbor_h, neighbor_w]
-                    rgb2[h, w] = rgb[neighbor_h, neighbor_w]
-
-            data_ = torch.cat([rays_o, rays_d, rays_d2, rgb, rgb2], dim=-1) # [H, W, 15]
-            data_ = data_.view(-1, 15) # [H*W, 15]
-
-            data += [data_] 
-            print(f'[{i}/{args.n_pose_kd}] Using teacher to render more images... elapsed time: {(time.time() - t0):.2f}s')
-            print(f'Predicted finish time: {timer()}')
-
-            # check pseudo images
-            if i <= 5:
-                filename = f'{datadir_kd_new}/pseudo_sample_{i}.png'
-                imageio.imwrite(filename, to8b(rgb))
-
-            # save to avoid out of memory
-            if i % i_save == 0:
-                data = torch.cat(data, dim=0) # [i_save*H*W, 15]
-                
-                # shuffle rays
-                rand_ix1 = np.random.permutation(data.shape[0])
-                rand_ix2 = np.random.permutation(data.shape[0])
-                data = data[rand_ix1][rand_ix2]
-                data = to_array(data)
-
-                # save
-                num = data.shape[0] // split_size * split_size
-                for ix in range(0, num, split_size):
-                    split += 1
-                    save_path = f'{datadir_kd_new}/data_{split}.npy'
-                    d = data[ix: ix+split_size]
-                    np.save(save_path, d)
-                print(f'[{i}/{args.n_pose_kd}] Saved data at "{datadir_kd_new}"')
-                data = [] # reset
-
     
 if __name__=='__main__':
     train()

@@ -1,4 +1,4 @@
-from os import getgroups
+import copy
 import torch
 torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn 
@@ -6,7 +6,10 @@ import torch.nn.functional as F
 import numpy as np, time, math
 
 # TODO: remove this dependency
-# from torchsearchsorted import searchsorted # not used by raybased nerf, commented because it is not compiled successfully using docker
+try:
+    from torchsearchsorted import searchsorted # not used by raybased nerf, commented because it is not compiled successfully using docker
+except:
+    pass
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Misc
@@ -494,9 +497,8 @@ def translate_origin_fixed(rays_o, rays_d, scale, n_print=0):
 def get_rays(H, W, focal, c2w, trans_origin='', focal_scale=1):
     focal *= focal_scale
     i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H)) # pytorch's meshgrid has indexing='ij'
-    i = i.t().to(device)
-    j = j.t().to(device)
-    dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1)
+    i, j = i.t().to(device), j.t().to(device)
+    dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1) # TODO-@mst: check if this H/W or W/H is in the right order
     # Rotate ray directions from camera frame to the world frame
     # rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
     rays_d = torch.sum(dirs.unsqueeze(dim=-2) * c2w[:3,:3], -1)  # shape: [H, W, 3]

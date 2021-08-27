@@ -226,12 +226,14 @@ class BlenderDataset_v2(Dataset):
         self.datadir = datadir
         all_splits = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('.npy')]
         self.all_splits = all_splits
+        self.dim_dir = dim_dir
+        self.dim_rgb = dim_rgb
         print(f'Load data done. #All files: {len(self.all_splits)}')
 
     def __getitem__(self, index):
         d = np.load(self.all_splits[index])
         d = torch.Tensor(d)
-        return d[:, :3], d[:, 3:3+dim_dir], d[:, 3+dim_dir:3+dim_dir+dim_rgb]
+        return d[:, :3], d[:, 3:3+self.dim_dir], d[:, 3+self.dim_dir:3+self.dim_dir+self.dim_rgb]
     
     def __len__(self):
         return len(self.all_splits)

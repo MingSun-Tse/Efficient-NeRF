@@ -198,7 +198,6 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     torch.backends.cudnn.benchmark = True
     for i, c2w in enumerate(render_poses):
         t0 = time.time()
-        print(f'==> [#{i}] frame, rendering begins')
         if args.model_name in ['nerf']:
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs) 
 
@@ -210,7 +209,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             # rays_o, rays_d = get_rays1(H, W, focal, c2w[:3, :4]) # rays_o shape: # [H, W, 3]
             rays_o, rays_d = rays_o_all[randix], rays_d_all[randix]
             rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3) # [H*W, 3]
-            print(f'[00] {time.time() - t0:.4f}s -- after getting rays origins and directions')
+            print(f'[00] {time.time() - t0:.4f}s')
 
             # network forward
             if args.model_name in ['nerf_v2', 'nerf_v3']:
@@ -226,7 +225,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                     rgb = model(rays_o, rays_d, rays_d2=None, scale=args.forward_scale, perturb=perturb, test=True)
                 rgb = torch.reshape(rgb, (H, W, 3))
             
-            print(f'[01] {time.time() - t0:.4f}s -- after model forward: model(rays_o, rays_d)')
+            print(f'[01] {time.time() - t0:.4f}s')
 
             # enhance
             if 'network_enhance' in render_kwargs:
@@ -239,19 +238,26 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 
         rgbs.append(rgb)
         disps.append(disp)
-        print(f'[02] {time.time() - t0:.4f}s -- after append(rgb)')
+        print(f'[02] {time.time() - t0:.4f}s')
 
         if gt_imgs is not None:
             errors += [(rgb-gt_imgs[i]).abs()]
         
+        print(f'[03] {time.time() - t0:.4f}s')
+
         if savedir is not None:
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
             imageio.imwrite(filename, to8b(rgbs[-1]))
             if len(errors):
                 imageio.imwrite(filename.replace('.png', '_error.png'), to8b(errors[-1]))
-        
-        print(f'[03] {time.time() - t0:.4f}s -- end of per pixel (pose) loop')
-        print(f'[#{i}] frame, rendering done, time for this frame: {time.time()-t0:.4f}s')
+        print(f'[04] {time.time() - t0:.4f}s')
+
+        # torch.cuda.empty_cache()
+
+        print(f'[05] {time.time() - t0:.4f}s')
+        if i < 5:
+            print(f'[{i}] Rendering one frame, time: {time.time()-t0:.4f}s')
+        if i > 3: exit()
         print('')
 
     rgbs = torch.stack(rgbs, dim=0)
@@ -640,98 +646,19 @@ def render_rays(ray_batch,
 
     return ret
 
-def get_teacher_targets(poses, H, W, focal, render_kwargs_train, args):
-    render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
-    render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
-    render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
-    render_kwargs_.pop('teacher_fn')
-    render_kwargs_.pop('teacher_fine')
-    teacher_target = []
-    t_ = time.time()
-    for ix, pose in enumerate(poses):
-        print(f'[{ix}/{len(poses)}] Using teacher to render more images... elapsed time: {(time.time() - t_):.2f}s')
-        rays_o, rays_d = get_rays(H, W, focal, pose)
-        batch_rays = torch.stack([rays_o, rays_d], 0)
-        rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
-                                        verbose=False, retraw=False,
-                                        **render_kwargs_)
-        teacher_target.append(rgb)
-        # # check pseudo images
-        # filename = f'kd_fern_{ix}.png'
-        # imageio.imwrite(filename, to8b(rgb.data.cpu().numpy()))
-    print(f'Teacher rendering done ({len(poses)} views). Time: {(time.time() - t_):.2f}s')
-    return teacher_target
-
-def get_teacher_targets_v2(poses, H, W, focal, render_kwargs_train, args, pose_tag, check_img=False):
-    '''Save teacher target as .npy
-    '''
-    teacher_expid, teacher_iter = parse_expid_iter(args.teacher_ckpt)
-    target_path = f'data/pose_targets_{teacher_expid}_iter{teacher_iter}_pose{pose_tag}.npy'
-    if os.path.exists(target_path):
-        rgbs = np.load(target_path)
-        rgbs = to_tensor(rgbs)
-        print(f'Loaded saved teacher targets: "{target_path}"')
-        return rgbs
-    else:
-        if args.debug:
-            factor = args.render_factor if args.render_factor != 0 else 1
-            return torch.randn([poses.shape[0], int(H/factor), int(W/factor), 3]).to(device)
-        hwf = [H, W, focal]
-        render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
-        render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
-        render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
-        render_kwargs_.pop('teacher_fn')
-        render_kwargs_.pop('teacher_fine')
-        rgbs, *_ = render_path(poses, hwf, args.chunk, render_kwargs_, render_factor=args.render_factor)
-        np.save(target_path, to_array(rgbs))
-
-        # check teacher images
-        if check_img:
-            savedir = target_path.replace('.npy', '')
-            if not os.path.exists(savedir):
-                os.makedirs(savedir)
-            for ix, rgb in enumerate(rgbs):
-                imageio.imwrite(f'{savedir}/{ix}.png', to8b(rgb))
-        return rgbs
-
-def InfiniteSampler(n):
-    order = np.random.permutation(n)
-    i = 0
-    while True:
-        yield order[i]
-        i += 1
-        if i == n:
-            order = np.random.permutation(n)
-            i = 0
-
-from torch.utils import data
-class InfiniteSamplerWrapper(data.sampler.Sampler):
-    def __init__(self, num_samples):
-        self.num_samples = num_samples
-    def __iter__(self):
-        return iter(InfiniteSampler(self.num_samples))
-    def __len__(self):
-        return 2 ** 31
-
-def get_dataloader(dataset_type, datadir, pseudo_ratio=0.5):
-    if dataset_type == 'blender':
-        if args.data_mode in ['images']:
-            trainset = BlenderDataset(datadir, pseudo_ratio)
-            trainloader = torch.utils.data.DataLoader(dataset=trainset, 
-                    batch_size=1,
-                    num_workers=args.num_workers,
-                    pin_memory=True,
-                    sampler=InfiniteSamplerWrapper(len(trainset))
-            )
-        elif args.data_mode in ['rays']:
-            trainset = BlenderDataset_v2(datadir, pseudo_ratio, dim_dir=dim_dir, dim_rgb=dim_rgb)
-            trainloader = torch.utils.data.DataLoader(dataset=trainset, 
-                    batch_size=args.N_rand,
-                    num_workers=args.num_workers,
-                    pin_memory=True,
-                    sampler=InfiniteSamplerWrapper(len(trainset))
-            )
-    return iter(trainloader), len(trainset)
+# Ray helpers
+def get_rays(H, W, focal, c2w, trans_origin='', focal_scale=1):
+    focal *= focal_scale
+    i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H)) # pytorch's meshgrid has indexing='ij'
+    i, j = i.t().to(device), j.t().to(device)
+    dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1) # TODO-@mst: check if this H/W or W/H is in the right order
+    # Rotate ray directions from camera frame to the world frame
+    # rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
+    rays_d = torch.sum(dirs.unsqueeze(dim=-2) * c2w[:3,:3], -1)  # shape: [H, W, 3]
+    
+    # Translate camera frame's origin to the world frame. It is the origin of all rays.
+    rays_o = c2w[:3,-1].expand(rays_d.shape)
+    return rays_o, rays_d
 
 def get_pseudo_ratio(schedule, current_step):
     '''example of schedule: 1:0.2,500000:0.9'''
@@ -846,418 +773,35 @@ def train():
         video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
     else:
         video_poses = render_poses
-    # # ------------- check poses
-    # netprint('=====> Test poses:')
-    # for p in test_poses:
-    #     netprint(p.data.cpu().numpy())
-    #     netprint(f'radius: {(p[:3, -1]).norm().item()}')
-    #     diff = torch.zeros((360, 90))
-    #     for i in range(360):
-    #         for j in range(90):
-    #             diff[i, j] = (pose_spherical(i-180, -j, 4.0311289) - p).norm()
-    #     netprint(f'its angle: {(diff.argmin()/90-180).item(), (-diff.argmin()%90).item()}, diff: {diff.min().item()}')
     
-    # netprint('\n=====> Video poses:')
-    # video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
-    # for p in video_poses[:20]:
-    #     netprint(p.data.cpu().numpy())
-    #     netprint(f'radius: {(p[:3, -1]).norm().item()}')
-    # exit()
-    # # -------------
+    video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
 
-    # data sketch
-    print(f'{len(i_train)} original train views are [{" ".join([str(x) for x in i_train])}]')
-    print(f'{len(i_test)} test views are [{" ".join([str(x) for x in i_test])}]')
-    print(f'{len(i_val)} val views are [{" ".join([str(x) for x in i_val])}]')
-    print(f'train_images shape {train_images.shape} train_poses shape {train_images.shape}')
-
-    if args.test_teacher:
-        assert args.teacher_ckpt
-        print('Testing teacher...')
-        render_kwargs_ = {x: v for x, v in render_kwargs_test.items()}
-        render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
-        render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
-        with torch.no_grad():
-            *_, test_loss, test_psnr, _ = render_path(test_poses, hwf, 4096, render_kwargs_, gt_imgs=test_images, render_factor=args.render_factor)
-        print(f'Teacher test: Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
-
-    if args.test_pretrained:
-        print('Testing pretrained...')
-        with torch.no_grad():
-            *_, test_loss, test_psnr,_  = render_path(test_poses, hwf, 4096, render_kwargs_test, gt_imgs=test_images, render_factor=args.render_factor)
-        print(f'Pretrained test: Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
-
-    # @mst: use dataloader for training
-    kd_poses = None
-    if args.datadir_kd:
-        if args.dataset_type == 'blender':
-            pr = get_pseudo_ratio(args.pseudo_ratio_schedule, current_step=start+1)
-            trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
-        else: # LLFF dataset
-            kd_poses = copy.deepcopy(render_poses)
-            print(f'Using teacher to render {len(kd_poses)} images for KD...')
-            kd_targets = get_teacher_targets_v2(kd_poses, H, W, focal, render_kwargs_train, args, pose_tag=args.n_pose_kd)
-            n_total_img = len(kd_poses) + len(train_images)
-            pr = len(kd_poses) / n_total_img
-        print(f'Loaded data. Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f} ')
-
-    # get video_targets
-    video_targets = None
-    if args.teacher_ckpt:
-        t_ = time.time()
-        print('Get video targets...')
-        if kd_poses is not None and (video_poses - kd_poses).abs().sum() == 0:
-            video_targets = kd_targets
-        else:
-            video_targets = get_teacher_targets_v2(video_poses, H, W, focal, render_kwargs_train, args, pose_tag=args.n_pose_video)
-        print(f'Get video targets done (time: {time.time() - t_:.2f}s)')
-
-    # Short circuit if only rendering out from trained model
-    if args.render_only:
-        print('RENDER ONLY')
-        expid, iter_ = parse_expid_iter(args.pretrained_ckpt)
-        with torch.no_grad():
-            t_ = time.time()
-            if args.render_test:
-                print('Rendering test images...')
-                rgbs, *_, test_loss, test_psnr, errors = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, savedir=logger.gen_img_path, render_factor=args.render_factor)
-                print(f'[TEST] Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
-            else:
-                if args.dataset_type == 'blender':
-                    video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
-                else:
-                    video_poses = render_poses
-                print(f'Rendering video... (n_pose: {len(video_poses)})')
-                rgbs, *_, errors = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=video_targets, render_factor=args.render_factor)
-            t = time.time() - t_
-        video_path = f'{logger.gen_img_path}/video_{expid}_iter{iter_}_{args.video_tag}.mp4'
-        imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
-        if errors is not None:
-            imageio.mimwrite(video_path.replace('.mp4', '_error.mp4'), to8b(errors), fps=30, quality=8)
-        print(f'Save video: "{video_path} (time: {t:.2f}s)')
-        exit(0)
-
-    # Prepare raybatch tensor if batching random rays
-    N_rand = args.N_rand
-    use_batching = not args.no_batching
-    if use_batching:
-        # For random ray batching
-        print('get rays')
-        rays = np.stack([get_rays_np(H, W, focal, p) for p in poses[:,:3,:4]], 0) # [N, ro+rd, H, W, 3]
-        print('done, concats')
-        rays_rgb = np.concatenate([rays, images[:,None]], 1) # [N, ro+rd+rgb, H, W, 3]
-        rays_rgb = np.transpose(rays_rgb, [0,2,3,1,4]) # [N, H, W, ro+rd+rgb, 3]
-        rays_rgb = np.stack([rays_rgb[i] for i in i_train], 0) # train images only
-        rays_rgb = np.reshape(rays_rgb, [-1,3,3]) # [(N-1)*H*W, ro+rd+rgb, 3]
-        rays_rgb = rays_rgb.astype(np.float32)
-        print('shuffle rays')
-        np.random.shuffle(rays_rgb)
-        print('done')
-        i_batch = 0
-
-    # Move training data to GPU
-    if use_batching:
-        rays_rgb = torch.Tensor(rays_rgb).to(device)
-
-    # @mst: use our own lr scheduler
-    if args.lr:
-        lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
-
-    if args.hard_ratio:
-        hard_rays = to_tensor([])
-
-    # training
-    timer = Timer((args.N_iters - start) // args.i_testset)
-    hist_psnr = hist_psnr1 = hist_psnr2 = n_pseudo_img = n_seen_img = 0
-    global global_step
-    print('Begin training')
-    hard_pool_full = False
-    for i in trange(start+1, args.N_iters+1):
+    
+    if args.model_name in ['nerf']:
+        # set up input
         t0 = time.time()
-        global_step = i
-        loss_line = LossLine()
 
-        # update LR
-        if args.lr: # use our own lr schedule
-            new_lrate = lr_scheduler(optimizer, global_step)
-        else:
-            decay_rate = 0.1
-            decay_steps = args.lrate_decay * 1000
-            new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = new_lrate
+        t1 = time.time()
+        if args.
 
-        # Sample random ray batch
-        if use_batching: # @mst: False in default
-            # Random over all images
-            batch = rays_rgb[i_batch: i_batch+N_rand] # [B, 2+1, 3*?]
-            batch = torch.transpose(batch, 0, 1)
-            batch_rays, target_s = batch[:2], batch[2]
+    
+    if args.model_name in ['nerf_v2', 'nerf_v3']:
 
-            i_batch += N_rand
-            if i_batch >= rays_rgb.shape[0]:
-                print("Shuffle data after an epoch!")
-                rand_idx = torch.randperm(rays_rgb.shape[0])
-                rays_rgb = rays_rgb[rand_idx]
-                i_batch = 0
+
+    
+    
+    if args.model_name in ['nerf_v4']:
+        pass
+    
+    
+    
+    
+    
+    if args.model_name in ['nerf_v5']:
+
+
+
         
-        else:
-            # Random from one image
-            img_i = np.random.choice(i_train)
-            target = images[img_i]
-            pose = poses[img_i, :3,:4]
-            
-            # KD, update pose and target
-            if args.datadir_kd:
-                if args.data_mode in ['images']:
-                    if i % args.i_update_data == 0: # update trainloader, possibly load more data
-                        if args.dataset_type == 'blender':
-                            t_ = time.time()
-                            pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
-                            trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
-                            print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f}')
-
-                    # get pose and target
-                    if args.dataset_type == 'blender':
-                        target, pose, img_i = [x[0] for x in trainloader.next()] # batch size = 1
-                        target, pose = target.to(device), pose.to(device)
-                        pose = pose[:3, :4]
-                        if img_i >= n_original_img:
-                            n_pseudo_img += 1
-                    else: # LLFF dataset
-                        use_pseudo_img = torch.rand(1) < len(kd_poses) / (len(train_poses) + len(kd_poses))
-                        if use_pseudo_img:
-                            img_i = np.random.permutation(len(kd_poses))[0]
-                            pose = kd_poses[img_i, :3, :4]
-                            target = kd_targets[img_i]
-                            n_pseudo_img += 1
-                    
-                    n_seen_img += 1
-                    loss_line.update('pseudo_img_ratio', n_pseudo_img/ n_seen_img, '.4f')
-                
-                elif args.data_mode in ['rays']:
-                    if i % args.i_update_data == 0: # update trainloader, possibly load more data
-                        if args.dataset_type == 'blender':
-                            t_ = time.time()
-                            trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
-                            print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {n_total_img}')
-            
-            # get rays (rays_o, rays_d, target_s)
-            if N_rand is not None:
-                if args.data_mode in ['images']:
-                    rays_o, rays_d = get_rays(H, W, focal, pose)  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
-                    if i < args.precrop_iters:
-                        dH = int(H//2 * args.precrop_frac)
-                        dW = int(W//2 * args.precrop_frac)
-                        coords = torch.stack(
-                            torch.meshgrid(
-                                torch.linspace(H//2 - dH, H//2 + dH - 1, 2*dH), 
-                                torch.linspace(W//2 - dW, W//2 + dW - 1, 2*dW)
-                            ), -1)
-                        if i == start + 1:
-                            print(f"[Config] Center cropping of size {2*dH} x {2*dW} is enabled until iter {args.precrop_iters}")                
-                    else:
-                        coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W)), -1)  # (H, W, 2)
-
-                    # select pixels as a batch
-                    select_coords, patch_bbx = get_selected_coords(coords, N_rand, args.select_pixel_mode)
-
-                    # get rays_o and rays_d for the selected pixels
-                    rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-                    rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-                    batch_rays = torch.stack([rays_o, rays_d], 0)
-                    
-                    # get target for the selected pixels
-                    target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-                
-                elif args.data_mode in ['rays']:
-                    rays_o, rays_d, target_s = trainloader.next() # rays_o: [N_rand, 4096, 3] rays_d: [N_rand, 4096, dim_dir] target_s: [N_rand, 4096, dim_rgb]
-                    rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
-                    rays_o = rays_o.view(-1, 3) # [N_rand*4096, 3]
-                    rays_d = rays_d.view(-1, dim_dir) # [N_rand*4096, dim_dir]
-                    target_s = target_s.view(-1, dim_rgb) # [N_rand*4096, dim_rgb]
-                    if args.model_name in ['nerf_v4']: # in nerf_v4, load two rays each time
-                        rays_d, rays_d2 = rays_d[:, :3], rays_d[:, 3:6] # [N_rand*4096, 3]
-                        target_s, target_s2 = target_s[:, :3], target_s[:, 3:6] # [N_rand*4096, 3]
-            
-            batch_size = rays_o.shape[0]
-            if args.hard_ratio:
-                if isinstance(args.hard_ratio, list):
-                    n_hard_in = int(args.hard_ratio[0] * batch_size) # the number of hard samples into the hard pool
-                    n_hard_out = int(args.hard_ratio[1] * batch_size) # the number of hard samples out of the hard pool
-                else:
-                    n_hard_in = int(args.hard_ratio * batch_size)
-                    n_hard_out = n_hard_in
-                n_hard_in = min(n_hard_in, n_hard_out) # n_hard_in <= n_hard_out
-
-            if hard_pool_full:
-                rand_ix_out = np.random.permutation(hard_rays.shape[0])[:n_hard_out]
-                picked_hard_rays = hard_rays[rand_ix_out]
-                rays_o   = torch.cat([rays_o,   picked_hard_rays[:,  :3]], dim=0)
-                rays_d   = torch.cat([rays_d,   picked_hard_rays[:, 3:6]], dim=0)
-                target_s = torch.cat([target_s, picked_hard_rays[:, 6: ]], dim=0)
-            
-            # forward and get loss
-            loss = 0
-            t_ = time.time()
-            if args.model_name == 'nerf':
-                rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
-                                                        verbose=i < 10, retraw=True,
-                                                        **render_kwargs_train)
-                if 'rgb0' in extras:
-                    loss += img2mse(extras['rgb0'], target_s)
-
-            elif args.model_name in ['nerf_v2']:
-                model = render_kwargs_train['network_fn']
-                perturb = render_kwargs_train['perturb']
-                if args.directly_predict_rgb:
-                    rgb, *_ = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
-                else:
-                    rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
-            
-            elif args.model_name in ['nerf_v3']:
-                model = render_kwargs_train['network_fn']
-                perturb = render_kwargs_train['perturb']
-                rgb, *_ = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
-
-            elif args.model_name in ['nerf_v4']:
-                model = render_kwargs_train['network_fn']
-                perturb = render_kwargs_train['perturb']
-                rgb, rgb2 = model(rays_o, rays_d, rays_d2, scale=args.forward_scale, perturb=perturb)
-            
-            # rgb loss
-            loss_rgb = img2mse(rgb, target_s)
-            psnr = mse2psnr(loss_rgb)
-            loss_line.update('psnr', psnr.item(), '.4f')
-            if not (args.enhance_cnn and args.freeze_pretrained):
-                loss += loss_rgb
-            
-            if args.model_name in ['nerf_v4']:
-                loss_rgb2 = img2mse(rgb2, target_s2)
-                psnr2 = mse2psnr(loss_rgb2)
-                loss_line.update('psnr2', psnr2.item(), '.4f')
-                loss += loss_rgb2
-
-            # enhance cnn rgb loss
-            if args.enhance_cnn:
-                model_enhance = render_kwargs_train['network_enhance']
-                rgb1 = model_enhance(rgb, h=patch_h, w=patch_w)
-                loss_rgb1 = img2mse(rgb1, target_s)
-                psnr1 = mse2psnr(loss_rgb1)
-                loss_line.update('psnr1', psnr1.item(), '.4f')
-                loss += loss_rgb1
-            
-            t_forward = time.time() - t_
-            
-            # backward and update
-            t_ = time.time()
-            optimizer.zero_grad()
-            loss.backward()
-
-            # group l2 regularization
-            if args.group_l2:
-                for name, m in model.named_modules():
-                    if isinstance(m, (nn.Linear)):
-                        norm = torch.norm(m.weight.data, p=2, dim=-1, keepdim=True) # [d_out, 1]
-                        grad = m.weight.data / norm.expand_as(m.weight.data) # [d_out, d_in]
-                        m.weight.grad.data.add_(args.group_l2 * grad)
-            
-            optimizer.step()
-            t_param_update = time.time() - t_
-
-            # collect hard examples
-            if args.hard_ratio:
-                _, indices = torch.sort( torch.mean((rgb[:batch_size] - target_s[:batch_size]) ** 2, dim=1) )
-                hard_indices = indices[-n_hard_in:]
-                hard_rays_ = torch.cat([rays_o[hard_indices], rays_d[hard_indices], target_s[hard_indices]], dim=-1)
-                if hard_pool_full:
-                    hard_rays[rand_ix_out[:n_hard_in]] = hard_rays_ # replace
-                else:
-                    hard_rays = torch.cat([hard_rays, hard_rays_], dim=0) # append
-                    if hard_rays.shape[0] >= batch_size * args.hard_mul:
-                        hard_pool_full = True
-
-            # smoothing for log print
-            if not math.isinf(psnr.item()):
-                hist_psnr = psnr.item() if i == start + 1 else hist_psnr * 0.95 + psnr.item() * 0.05
-                loss_line.update('hist_psnr', hist_psnr, '.4f')
-            if args.model_name in ['nerf_v4'] and not math.isinf(psnr2.item()):
-                hist_psnr2 = psnr2.item() if i == start + 1 else hist_psnr2 * 0.95 + psnr2.item() * 0.05
-                loss_line.update('hist_psnr2', hist_psnr2, '.4f')
-            if args.enhance_cnn:
-                hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
-                loss_line.update('hist_psnr1', hist_psnr1, '.4f')
-
-        # print logs of training
-        if i % args.i_print == 0:
-            loss_line.update('t_forward', t_forward, '.2f')
-            loss_line.update('t_param_update', t_param_update, '.2f')
-            loss_line.update('t_total', time.time() - t0, '.2f')
-            logstr = f"[TRAIN] Iter {i} " + loss_line.format()
-            print(logstr)
-            # tqdm.write(logstr)
-
-            # save image for check
-            if args.enhance_cnn and i % (100 * args.i_print) == 0:
-                img = rgb1.reshape([patch_h, patch_w, 3])
-                save_path = f'{logger.gen_img_path}/train_patch_{ExpID}_iter{i}.png'
-                imageio.imwrite(save_path, to8b(img))
-
-        # check gradients to make sure group_l2 works normally
-        if args.group_l2 and i % (args.i_print * 10) == 0:
-            n_neuron_print = 10
-            print(f'iter {i} neuron norms (penalty factor {args.group_l2}):')
-            for name, m in model.named_modules():
-                if isinstance(m, (nn.Linear)):
-                    logstr = ['%.6f' % x for x in torch.norm(m.weight.data, p=2, dim=-1)[:n_neuron_print]]
-                    logstr = f'{name:<22s} ' + ' '.join(logstr)
-                    netprint(logstr)
-        
-        # test: using the splitted test images
-        if i % args.i_testset == 0:
-            testsavedir = f'{logger.gen_img_path}/testset_{ExpID}_iter{i}' # save the renderred test images
-            os.makedirs(testsavedir, exist_ok=True)
-            with torch.no_grad():
-                print(f'Iter {i} Testing...')
-                t_ = time.time()
-                *_, test_loss, test_psnr, errors = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, 
-                    savedir=testsavedir, render_factor=args.render_factor)
-                t_test = time.time() - t_
-            accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} Train_HistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s')
-            print(f'Saved rendered test images: "{testsavedir}"')
-            print(f'Predicted finish time: {timer()}')
-
-        # test: using novel poses
-        if i % args.i_video == 0:
-            with torch.no_grad():
-                print(f'Iter {i} Rendering video... (n_pose: {len(video_poses)})')
-                t_ = time.time()
-                rgbs, disps, *_, video_loss, video_psnr, errors = render_path(video_poses, hwf, args.chunk, render_kwargs_test, 
-                        gt_imgs=video_targets, render_factor=args.render_factor)
-                t_video = time.time() - t_
-            video_path = f'{logger.gen_img_path}/video_{ExpID}_iter{i}_{args.video_tag}.mp4'
-            imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
-            # imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
-            print(f'[VIDEO] Rendering done. Time {t_video:.2f}s. Save video: "{video_path}"')
-            if video_psnr is not None:
-                print(f'[VIDEO] video_loss {video_loss.item():.4f} video_psnr {video_psnr.item():.4f}')
-                imageio.mimwrite(video_path.replace('.mp4', '_error.mp4'), to8b(errors), fps=30, quality=8)
-
-        # save checkpoint
-        if i % args.i_weights == 0:
-            path = os.path.join(logger.weights_path, '{:06d}.tar'.format(i))
-            to_save = {
-                'global_step': global_step,
-                'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-            }
-            if args.model_name in ['nerf'] and args.N_importance > 0:
-                to_save['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
-            if args.enhance_cnn:
-                to_save['network_enhance_state_dict'] = render_kwargs_train['network_enhance'].state_dict()
-            torch.save(to_save, path)
-            print(f'Iter {i} Save checkpoint: "{path}"')
 
 if __name__=='__main__':
-    # torch.set_default_tensor_type('torch.cuda.FloatTensor')
     train()
