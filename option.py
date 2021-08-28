@@ -196,7 +196,7 @@ parser.add_argument('--num_shared_pixels', type=int, default=4)
 args = parser.parse_args()
 
 if args.video_tag == '':
-    args.video_rag = f'pose{args.n_pose_video}'
+    args.video_tag = f'pose{args.n_pose_video}'
     
 def check_n_pose(n_pose):
     if n_pose.lower() == 'none':
