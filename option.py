@@ -119,7 +119,7 @@ parser.add_argument('--screen_print', action="store_true")
 parser.add_argument('--cache_ignore', type=str, default='')
 
 # @mst: related to nerf_v2
-parser.add_argument('--model_name', type=str, default='nerf_v2', choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v4', 'nerf_v5'])
+parser.add_argument('--model_name', type=str, default='nerf_v2', choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v4', 'nerf_v5'])
 parser.add_argument('--N_iters', type=int, default=200000)
 parser.add_argument('--skips', type=str, default='4')
 parser.add_argument('--D_head', type=int, default=4)

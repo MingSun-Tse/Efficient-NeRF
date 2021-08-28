@@ -69,6 +69,48 @@ def get_embedder(multires, i=0):
     embed = lambda x, eo=embedder_obj : eo.embed(x)
     return embed, embedder_obj.out_dim
 
+class PointSampler():
+    def __init__(self, H, W, focal, n_sample, near, far):
+        self.H, self.W = H, W
+        i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H))
+        i, j = i.t(), j.t()
+        self.dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], dim=-1).to(device) # [H, W, 3]
+        
+        t_vals = torch.linspace(0., 1., steps=n_sample).to(device) # [n_sample]
+        self.z_vals = near * (1 - t_vals) + far * (t_vals) # [n_sample]
+        self.z_vals_test = self.z_vals[None, :].expand(H*W, n_sample) # [H*W, n_sample]
+
+    def sample_test(self, c2w): # c2w: [3, 4]
+        rays_d = torch.sum(self.dirs.unsqueeze(dim=-2) * c2w[:3,:3], dim=-1).view(-1, 3) # [H*W, 3] # TODO-@mst: improve this non-intuitive impl.
+        rays_o = c2w[:3, -1].expand(rays_d.shape) # [H*W, 3]
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * self.z_vals_test[..., :, None] # [H*W, n_sample, 3]
+        return pts.view(pts.shape[0], -1) # [H*W, n_sample*3]
+    
+    def sample_train(self, rays_o, rays_d, perturb):
+        z_vals = self.z_vals[None, :].expand(rays_o.shape[0], self.z_vals.shape[0]) # [n_ray, n_sample]
+        if perturb > 0.:
+            # get intervals between samples
+            mids = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
+            upper = torch.cat([mids, z_vals[..., -1:]], dim=-1)
+            lower = torch.cat([z_vals[..., :1],  mids], dim=-1)
+            # stratified samples in those intervals
+            t_rand = torch.rand(z_vals.shape).to(device) # uniform dist [0, 1)
+            z_vals = lower + (upper - lower) * t_rand
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [H*W, n_sample, 3]
+        return pts.view(pts.shape[0], -1)
+
+class PositionalEmbedder():
+    def __init__(self, L, include_input=True):
+        self.weights = 2 ** torch.linspace(0, L-1, steps=L).to(device) # [L]
+        self.include_input = include_input
+        self.embed_dim = 2 * L + 1 if include_input else 2 * L
+    def __call__(self, x): 
+        y = x[..., :, None] * self.weights # [n_ray, dim_pts, 1] * [L] -> [n_ray, dim_pts, L]
+        y = torch.cat([torch.sin(y), torch.cos(y)], dim=-1) # [n_ray, dim_pts, 2L]
+        if self.include_input:
+            y = torch.cat([y, x.unsqueeze(dim=-1)], dim=-1) # [n_ray, dim_pts, 2L+1]
+        return y.view(y.shape[0], -1) # [n_ray, dim_pts*(2L+1)], example: 48*21=1008
+
 def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False, global_step=-1, print=print):
     """Transforms model's predictions to semantically meaningful values.
     Args:
@@ -231,8 +273,7 @@ class NeRF(nn.Module):
         self.alpha_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear+1]))
 
 class NeRF_v2(nn.Module):
-    '''New idea: one forward to get multi-outputs.
-    '''
+    '''Raybased nerf. Similar arch to NeRF (using skip layers and view direction as input)'''
     def __init__(self, args, near, far, print=print):
         super(NeRF_v2, self).__init__()
         self.args = args
@@ -354,88 +395,8 @@ class NeRF_v2(nn.Module):
             rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, self.args.raw_noise_std, white_bkgd=False, pytest=False, global_step=global_step, print=self.print)
             return rgb_map, disp_map, acc_map, weights, depth_map, raw, pts, viewdirs
 
-
-def default_conv(in_channels, out_channels, kernel_size, bias=True):
-    return nn.Conv2d(
-        in_channels, out_channels, kernel_size,
-        padding=(kernel_size//2), bias=bias)
-
-
-class MeanShift(nn.Conv2d):
-    def __init__(self, rgb_range, rgb_mean, rgb_std, sign=-1):
-        super(MeanShift, self).__init__(3, 3, kernel_size=1)
-        std = torch.Tensor(rgb_std)
-        self.weight.data = torch.eye(3).view(3, 3, 1, 1)
-        self.weight.data.div_(std.view(3, 1, 1, 1))
-        self.bias.data = sign * rgb_range * torch.Tensor(rgb_mean)
-        self.bias.data.div_(std)
-        self.requires_grad = False
-
-
-class ResBlock(nn.Module):
-    def __init__(
-        self, conv, n_feat, kernel_size,
-        bias=True, bn=False, act=nn.ReLU(True), res_scale=1):
-        super(ResBlock, self).__init__()
-        m = []
-        for i in range(2):
-            m.append(conv(n_feat, n_feat, kernel_size, bias=bias))
-            if bn: m.append(nn.BatchNorm2d(n_feat))
-            if i == 0: m.append(act)
-
-        self.body = nn.Sequential(*m)
-        self.res_scale = res_scale
-
-    def forward(self, x):
-        res = self.body(x).mul(self.res_scale)
-        res += x
-        return res
-
-class EDSR(nn.Module):
-    '''Refer to: https://github.com/yulunzhang/RCAN/blob/master/RCAN_TrainCode/code/model/edsr.py
-    '''
-    def __init__(self):
-        super(EDSR, self).__init__()
-        n_resblock = 10
-        n_feats = 64 # num of filters in each layer
-        kernel_size = 3
-        n_colors = 3
-        conv = default_conv
-        act = nn.ReLU(True)
-        rgb_range = 1
-
-        rgb_mean = (0.4488, 0.4371, 0.4040)
-        rgb_std = (1.0, 1.0, 1.0)
-        self.sub_mean = MeanShift(rgb_range, rgb_mean, rgb_std)
-        
-        # define head module
-        m_head = [conv(n_colors, n_feats, kernel_size)]
-
-        # define body module
-        m_body = [ResBlock(conv, n_feats, kernel_size, act=act) for _ in range(n_resblock)]
-        # m_body.append(conv(n_feats, n_feats, kernel_size))
-
-        # define tail module
-        m_tail = [conv(n_feats, n_colors, kernel_size)]
-
-        self.add_mean = MeanShift(rgb_range, rgb_mean, rgb_std, 1)
-
-        self.head = nn.Sequential(*m_head)
-        self.body = nn.Sequential(*m_body)
-        self.tail = nn.Sequential(*m_tail)
-
-    def forward(self, x):
-        x = self.sub_mean(x)
-        x = self.head(x)
-        res = self.body(x)
-        res += x
-        x = self.tail(res)
-        x = self.add_mean(x)
-        return x
-
 class NeRF_v3(nn.Module):
-    '''Move view directions to the very first input layer and no skip layers.
-    '''
+    '''No input skip layers. Move view direction as input to the very 1st layer.'''
     def __init__(self, args, near, far):
         super(NeRF_v3, self).__init__()
         self.args = args
@@ -520,7 +481,7 @@ class NeRF_v3(nn.Module):
                 embedded_dirs = self.embeddirs_fn(dirs) # [n_ray * n_sample, 27]
                 embedded_dirs = embedded_dirs.view(rays_o.size(0), -1) # [n_ray, n_sample * 27]
                 embedded_pts = torch.cat([embedded_pts, embedded_dirs], dim=-1)
-        
+
         else: # n_sample = 1
             embedded_pts = self.embed_fn(rays_o) # [n_ray, 63]
             if self.args.use_viewdirs:
@@ -529,13 +490,20 @@ class NeRF_v3(nn.Module):
 
         print(f'Inside model forward [02] {time.time() - t0:.4f}s -- after positional encoding of directions')
         # network forward
-        # h = self.head(embedded_pts)
-        # h = self.body(h) + h if self.args.use_residual else self.body(h)
-        # rgb = self.tail(h)
-        rgb = torch.ones(n_ray, 3)
+        h = self.head(embedded_pts)
+        h = self.body(h) + h if self.args.use_residual else self.body(h)
+        rgb = self.tail(h)
+        # rgb = torch.ones(n_ray, 3)
         print(f'Inside model forward [03] {time.time() - t0:.4f}s -- after network forward')
         return rgb, rgb
-
+    
+    def forward_(self, embedded_pts):
+        '''move positional encoding out'''
+        h = self.head(embedded_pts)
+        h = self.body(h) + h if self.args.use_residual else self.body(h)
+        rgb = self.tail(h)
+        return rgb, rgb
+    
 class NeRF_v4(nn.Module):
     '''Spatial sharing'''
     def __init__(self, args, near, far):
@@ -697,7 +665,7 @@ class NeRF_v4(nn.Module):
         return rgbs
 
 class NeRF_v5(nn.Module):
-    '''Use 1x1 conv to impl. MLP in nerf'''
+    '''Use 1x1 conv to implement MLP in nerf'''
     def __init__(self, args, near, far):
         super(NeRF_v5, self).__init__()
         self.args = args
@@ -741,3 +709,36 @@ class NeRF_v5(nn.Module):
         x = self.head(x)
         x = self.body(x) + x if self.args.use_residual else self.body(x)
         return self.tail(x)
+
+class NeRF_v3_2(nn.Module):
+    '''Based on NeRF_v3, move positional embedding out'''
+    def __init__(self, args, input_dim):
+        super(NeRF_v3_2, self).__init__()
+        self.args = args
+        D, W = args.netdepth, args.netwidth
+
+        # get network width
+        if args.layerwise_netwidths:
+            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
+            print('Layer-wise widths are given. Overwrite args.netwidth')
+        else:
+            Ws = [W] * (D-1) + [3]
+
+        # head
+        self.input_dim = input_dim
+        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU()])
+        
+        # body
+        body = []
+        for i in range(1, D-1):
+            body += [nn.Linear(Ws[i-1], Ws[i]), nn.ReLU()]
+        self.body = nn.Sequential(*body)
+        
+        # tail
+        self.tail = nn.Linear(input_dim, 3) if args.linear_tail else nn.Sequential(*[nn.Linear(Ws[D-2], 3), nn.Sigmoid()])
+    
+    def forward(self, embedded_pts):
+        h = self.head(embedded_pts)
+        h = self.body(h) + h if self.args.use_residual else self.body(h)
+        return self.tail(h)
+    
