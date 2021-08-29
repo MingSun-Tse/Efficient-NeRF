@@ -161,6 +161,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         focal = focal / render_factor
 
     torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = True
     rgbs, disps, errors = [], [], []
     for i, c2w in enumerate(render_poses):
         t0 = time.time()
@@ -169,7 +170,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs) 
 
         elif args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v4']:
-            model = render_kwargs['network_fn']
+            model = render_kwargs['network_fn'].eval()
             perturb = render_kwargs['perturb']
 
             # get rays_o and rays_d
@@ -233,6 +234,8 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         errors = torch.stack(errors, dim=0)
     else:
         test_loss, test_psnr, errors = None, None, None
+    
+    model.train() # set back to train
     return rgbs, disps, test_loss, test_psnr, errors
 
 
