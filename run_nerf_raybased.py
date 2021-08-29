@@ -41,6 +41,7 @@ get_rays = partial(get_rays, trans_origin=args.trans_origin, focal_scale=args.fo
 dim_dir = dim_rgb = 3
 if args.model_name in ['nerf_v4']:
     dim_dir = dim_rgb = 6
+
 # ---------------------------------
 
 def batchify(fn, chunk):
@@ -159,7 +160,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         H = int(H / render_factor)
         W = int(W / render_factor)
         focal = focal / render_factor
-
+    
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = True
     rgbs, disps, errors = [], [], []
@@ -368,9 +369,9 @@ def create_nerf(args, near, far):
 
     # use DataParallel
     if not args.render_only: # when rendering, use just one GPU
-        model = torch.nn.DataParallel(model)
+        model = nn.DataParallel(model)
         if model_fine is not None:
-            model_fine = torch.nn.DataParallel(model_fine)
+            model_fine = nn.DataParallel(model_fine)
 
     # pruning, before 'render_kwargs_train'
     if args.model_name in ['nerf_v2', 'nerf_v3'] and args.pruner:
@@ -429,7 +430,7 @@ def create_nerf(args, near, far):
         n_flops = get_n_flops_(model, input=dummy_rays_o, count_adds=False, rays_d=dummy_rays_d)
 
     elif args.model_name in ['nerf_v3.2']:
-        dummy_input = torch.randn(1, input_dim).to(device)
+        dummy_input = torch.randn(1, model.module.input_dim).to(device)
         n_flops = get_n_flops_(model, input=dummy_input, count_adds=False)
 
     elif args.model_name in ['nerf_v4']: # TODO-@smt: this is not correct
@@ -736,6 +737,48 @@ def get_pseudo_ratio(schedule, current_step):
         pr = (prs[1] - prs[0]) / (steps[1] - steps[0]) * (current_step - steps[0]) + prs[0]
     return pr
 
+def save_onnx(model, onnx_path):
+    model = copy.deepcopy(model)
+    if hasattr(model, 'module'): model = model.module
+    dummy_input = torch.randn(1, model.input_dim).to(device)
+    torch.onnx.export(model.cpu(),
+                    dummy_input.cpu(),
+                    onnx_path,
+                    export_params=True,
+                    opset_version=11,
+                    do_constant_folding=True,
+                    input_names=['input'],
+                    output_names=['output'],
+                    dynamic_axes={
+                        'input': {0: 'batch_size'},
+                        'output': {0: 'batch_size'}
+                    })
+    del model
+
+#TODO-@mst: move these utility functions to a better place
+def check_onnx(model, onnx_path):
+    ''' refer to https://pytorch.org/tutorials/advanced/super_resolution_with_onnxruntime.html '''
+    import onnx, onnxruntime
+    model = copy.deepcopy(model)
+    if hasattr(model, 'module'): model = model.module
+    model = model.cpu()
+    # get torch output as ground truth
+    batch_size = 64
+    x = torch.randn(batch_size, model.input_dim, requires_grad=True)
+    torch_out = model(x)
+    
+    onnx_model = onnx.load(onnx_path)
+    onnx.checker.check_model(onnx_model)
+    ort_session = onnxruntime.InferenceSession(onnx_path)
+    def to_numpy(tensor):
+        return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
+    # compute ONNX Runtime output prediction
+    ort_inputs = {ort_session.get_inputs()[0].name: to_numpy(x)}
+    ort_outs = ort_session.run(None, ort_inputs)
+    # compare ONNX Runtime and PyTorch results
+    np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-05)
+    print("Exported model has been tested with ONNXRuntime, and the result looks good!")
+
 def train():
     # Load data
     if args.dataset_type == 'llff':
@@ -923,6 +966,13 @@ def train():
         if errors is not None:
             imageio.mimwrite(video_path.replace('.mp4', '_error.mp4'), to8b(errors), fps=30, quality=8)
         print(f'Save video: "{video_path} (time: {t:.2f}s)')
+        exit(0)
+    
+    if args.convert_to_onnx:
+        onnx_path = args.pretrained_ckpt.replace('.tar', '.onnx')
+        save_onnx(render_kwargs_test['network_fn'], onnx_path)
+        check_onnx(render_kwargs_test['network_fn'], onnx_path)
+        print(f'Convert to onnx done. Saved at "{onnx_path}"') 
         exit(0)
 
     # Prepare raybatch tensor if batching random rays
@@ -1239,18 +1289,27 @@ def train():
 
         # save checkpoint
         if i % args.i_weights == 0:
-            path = os.path.join(logger.weights_path, '{:06d}.tar'.format(i))
+            path = os.path.join(logger.weights_path, 'ckpt.tar'.format(i))
             to_save = {
                 'global_step': global_step,
                 'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'network_fn': render_kwargs_train['network_fn'],
             }
             if args.model_name in ['nerf'] and args.N_importance > 0:
+                to_save['network_fn'] = render_kwargs_train['network_fine'],
                 to_save['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
             if args.enhance_cnn:
+                to_save['network_enhance'] = render_kwargs_train['network_enhance'],
                 to_save['network_enhance_state_dict'] = render_kwargs_train['network_enhance'].state_dict()
             torch.save(to_save, path)
-            print(f'Iter {i} Save checkpoint: "{path}"')
+            save_log = f'Iter {i} Save checkpoint: "{path}"'
+            
+            # convert to onnx
+            onnx_path = path.replace('.tar', '.onnx')
+            save_onnx(model, onnx_path)
+            save_log += f', onnx saved at "{onnx_path}"'
+            print(save_log)
 
 if __name__=='__main__':
     # torch.set_default_tensor_type('torch.cuda.FloatTensor')

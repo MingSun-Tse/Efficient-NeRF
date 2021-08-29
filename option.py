@@ -193,6 +193,7 @@ parser.add_argument('--branch_loc', type=int, default=9)
 parser.add_argument('--branchwidth', type=int, default=256)
 parser.add_argument('--branchdepth', type=int, default=3)
 parser.add_argument('--num_shared_pixels', type=int, default=4)
+parser.add_argument('--convert_to_onnx', action='store_true')
 args = parser.parse_args()
 
 if args.video_tag == '':
