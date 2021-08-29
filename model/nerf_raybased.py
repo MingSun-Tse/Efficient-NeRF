@@ -422,13 +422,13 @@ class NeRF_v3(nn.Module):
         input_dim *= n_sample
 
         # head
-        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU()])
+        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU(inplace=True)])
         input_dim = Ws[0]
         
         # body
         body = []
         for i in range(1, D - 1):
-            body += [nn.Linear(input_dim, Ws[i]), nn.ReLU()]
+            body += [nn.Linear(input_dim, Ws[i]), nn.ReLU(inplace=True)]
             input_dim = Ws[i]
         self.body = nn.Sequential(*body)
         
@@ -531,7 +531,7 @@ class NeRF_v4(nn.Module):
         input_dim *= n_sample
 
         # head
-        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU()])
+        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU(inplace=True)])
         feat_dim = Ws[0]
         
         # body
@@ -549,9 +549,9 @@ class NeRF_v4(nn.Module):
         
         # branch net to predict neighbor pixels
         branch_input_dim = Ws[args.branch_loc] + input_dim
-        branch = [nn.Linear(branch_input_dim, args.branchwidth), nn.ReLU()] # 1st layer
+        branch = [nn.Linear(branch_input_dim, args.branchwidth), nn.ReLU(inplace=True)] # 1st layer
         for _ in range(args.branchdepth - 2):
-            branch += [nn.Linear(args.branchwidth, args.branchwidth), nn.ReLU()]
+            branch += [nn.Linear(args.branchwidth, args.branchwidth), nn.ReLU(inplace=True)]
         branch += [nn.Linear(args.branchwidth, 3)] # last layer, predict the residual of rgb, so 3
         self.branch = nn.Sequential(*branch)
 
@@ -691,12 +691,12 @@ class NeRF_v5(nn.Module):
         input_dim *= n_sample
 
         # head
-        self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=1), nn.ReLU()])
+        self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=1), nn.ReLU(inplace=True)])
         
         # body
         body = []
         for i in range(1, D - 1):
-            body += [nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=1), nn.ReLU()]
+            body += [nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=1), nn.ReLU(inplace=True)]
         self.body = nn.Sequential(*body)
         
         # tail
@@ -726,12 +726,12 @@ class NeRF_v3_2(nn.Module):
 
         # head
         self.input_dim = input_dim
-        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU()])
+        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU(inplace=True)])
         
         # body
         body = []
         for i in range(1, D-1):
-            body += [nn.Linear(Ws[i-1], Ws[i]), nn.ReLU()]
+            body += [nn.Linear(Ws[i-1], Ws[i]), nn.ReLU(inplace=True)]
         self.body = nn.Sequential(*body)
         
         # tail
