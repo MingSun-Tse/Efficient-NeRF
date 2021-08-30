@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.benchmark as benchmark
 # from torch.utils.tensorboard import SummaryWriter
 from model.nerf_raybased import NeRF, NeRF_v2, NeRF_v3, NeRF_v3_2, NeRF_v4, NeRF_v5
 from model.nerf_raybased import PositionalEmbedder, PointSampler
@@ -163,22 +164,24 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = True
+    render_kwargs['network_fn'].eval()
     rgbs, disps, errors = [], [], []
+
     for i, c2w in enumerate(render_poses):
+        torch.cuda.synchronize()
         t0 = time.time()
         print(f'[#{i}] frame, rendering begins')
         if args.model_name in ['nerf']:
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs) 
 
         elif args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v4']:
-            model = render_kwargs['network_fn'].eval()
+            model = render_kwargs['network_fn']
             perturb = render_kwargs['perturb']
 
             # get rays_o and rays_d
             if args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v4']:
                 rays_o, rays_d = get_rays1(H, W, focal, c2w[:3, :4]) # [H, W, 3]
                 rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3) # [H*W, 3]
-                print(f'[00] {time.time() - t0:.4f}s -- after getting rays origins and directions')
 
             # network forward
             if args.model_name in ['nerf_v2', 'nerf_v3']:
@@ -190,7 +193,17 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             
             elif args.model_name in ['nerf_v3.2']:
                 with torch.no_grad():
-                    rgb = model(positional_embedder(point_sampler.sample_test(c2w)))
+                    torch.cuda.synchronize()
+                    t_ = time.time()
+                    model_input = positional_embedder(point_sampler.sample_test(c2w))
+                    torch.cuda.synchronize()
+                    print(f'[01] {time.time() - t_:.4f}s -- after get model_input')
+                    
+                    torch.cuda.synchronize()
+                    t_ = time.time()
+                    rgb = model(model_input)
+                    torch.cuda.synchronize()
+                    print(f'[02] {time.time() - t_:.4f}s -- after model forward')
             
             elif args.model_name in ['nerf_v4']:
                 rays_o = torch.reshape(rays_o, (-1, args.num_shared_pixels * 3))
@@ -198,8 +211,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 with torch.no_grad():
                     rgb = model(rays_o, rays_d, rays_d2=None, scale=args.forward_scale, perturb=perturb, test=True)
                 rgb = torch.reshape(rgb, (H, W, 3))
-            print(f'[01] {time.time() - t0:.4f}s -- after model forward: model(rays_o, rays_d)')
-
+            
             # enhance
             if 'network_enhance' in render_kwargs:
                 model_enhance = render_kwargs['network_enhance']
@@ -208,10 +220,9 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             # reshape to image
             rgb = rgb.view(H, W, 3)
             disp = rgb # placeholder, to maintain compability
-                
+  
         rgbs.append(rgb)
         disps.append(disp)
-        print(f'[02] {time.time() - t0:.4f}s -- after append(rgb)')
 
         if gt_imgs is not None:
             errors += [(rgb-gt_imgs[i]).abs()]
@@ -222,10 +233,9 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             if len(errors):
                 imageio.imwrite(filename.replace('.png', '_error.png'), to8b(errors[-1]))
         
-        print(f'[03] {time.time() - t0:.4f}s -- end of per pixel (pose) loop')
         print(f'[#{i}] frame, rendering done, time for this frame: {time.time()-t0:.4f}s')
         print('')
-
+    
     rgbs = torch.stack(rgbs, dim=0)
     disps = torch.stack(disps, dim=0)
     
@@ -236,9 +246,14 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     else:
         test_loss, test_psnr, errors = None, None, None
     
-    model.train() # set back to train
+    render_kwargs['network_fn'].train()
     return rgbs, disps, test_loss, test_psnr, errors
 
+
+def render_func(model, pose):
+    with torch.no_grad():
+        rgb = model(positional_embedder(point_sampler.sample_test(pose)))
+    return rgb
 
 def create_nerf(args, near, far):
     """Instantiate NeRF's MLP model.
@@ -430,7 +445,8 @@ def create_nerf(args, near, far):
         n_flops = get_n_flops_(model, input=dummy_rays_o, count_adds=False, rays_d=dummy_rays_d)
 
     elif args.model_name in ['nerf_v3.2']:
-        dummy_input = torch.randn(1, model.module.input_dim).to(device)
+        if hasattr(model, 'module'): model = model.module
+        dummy_input = torch.randn(1, model.input_dim).to(device)
         n_flops = get_n_flops_(model, input=dummy_input, count_adds=False)
 
     elif args.model_name in ['nerf_v4']: # TODO-@smt: this is not correct
@@ -440,16 +456,19 @@ def create_nerf(args, near, far):
     
     elif args.model_name in ['nerf_v5']:
         input_dim = input_ch + input_ch_views if args.use_viewdirs else input_ch
-        n_img, H, W = 100, 400, 400
-        dummy_rays_o = torch.ones(n_img, input_dim * args.n_sample_per_ray, H, W)
+        n_img, H, W = 1, 400, 400
+        dummy_rays_o = torch.ones(n_img, input_dim * args.n_sample_per_ray, H, W).to(device)
         t0 = time.time()
-        for ix in range(n_img):
+        n_iter = 10
+        for ix in range(n_iter):
+            torch.cuda.synchronize()
             t1 = time.time()
             with torch.no_grad():
-                model(dummy_rays_o[ix].unsqueeze(dim=0).cuda())
+                model(dummy_rays_o)
+            torch.cuda.synchronize()
             t2 = time.time()
-            print(f'{ix:2d} Forward time per image: {t2 - t1:.4f}s')
-        print(f'Average: {(t2-t0)/n_img:.4f}s')
+            print(f'Iter {ix:2d} Forward time per image: {(t2 - t1) / n_img:.4f}s')
+        print(f'Average forward time per image: {(t2-t0) / (n_iter * n_img):.4f}s')
         exit()
         n_flops = get_n_flops_(model, input=dummy_rays_o, count_adds=False) / (n_img * H * W)
 
@@ -975,6 +994,15 @@ def train():
         print(f'Convert to onnx done. Saved at "{onnx_path}"') 
         exit(0)
 
+    if args.benchmark:
+        x = video_poses[0]
+        timer = benchmark.Timer(
+            stmt='render_func(model, pose)',
+            setup='from __main__ import render_func',
+            globals={'model': render_kwargs_test['network_fn'], 'pose': x})
+        print(timer.timeit(100))
+        exit(0)
+    
     # Prepare raybatch tensor if batching random rays
     N_rand = args.N_rand
     use_batching = not args.no_batching

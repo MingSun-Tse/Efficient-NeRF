@@ -194,6 +194,8 @@ parser.add_argument('--branchwidth', type=int, default=256)
 parser.add_argument('--branchdepth', type=int, default=3)
 parser.add_argument('--num_shared_pixels', type=int, default=4)
 parser.add_argument('--convert_to_onnx', action='store_true')
+parser.add_argument('--benchmark', action='store_true',
+        help='check inference speed (time of rendering a frame) with a trained model')
 args = parser.parse_args()
 
 if args.video_tag == '':
