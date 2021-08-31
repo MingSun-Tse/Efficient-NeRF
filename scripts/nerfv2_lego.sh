@@ -118,3 +118,12 @@ CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --config configs/ship.txt --r
 
 ## Test: nerf_v2, fern
 CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --config configs/fern.txt --render_only --n_sample_per_ray 4 --netwidth 512 --netdepth 32 --skips 8,16,24 --directly_predict_rgb --pretrained_ckpt Experiments/*-094802/weights/140000.tar --project Test_nerfv2_fern_094842_iter140000 --screen
+
+## nerf_v5 test snippet for checking speed
+CUDA_VISIBLE_DEVICES=2 python run_nerf_raybased.py --model_name nerf_v5 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 1024 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --project nerfv3.2__lego__S16W1024D11_DPRGB_BS98304_KDDataV8_Hard0.2_20xBS_Res_NoDir_L5 --cache_ignore data --screen --debug
+
+## use benchmark to check speed for nerf_v3.2
+CUDA_VISIBLE_DEVICES=2 python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 1024 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --project nerfv3.2__lego__S16W1024D11_DPRGB_BS98304_KDDataV8_Hard0.2_20xBS_Res_NoDir --cache_ignore data --screen --pretrained_ckpt Experiments/nerfv3.2__lego__S16W1024D11_DPRGB_BS98304_KDDataV8_Hard0.2_20xBS_Res_NoDir_SERVER-20210828-141538/weights/010000.tar --debug --benchmark
+
+## convert to onnx
+python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 1024 --netdepth 11 --use_residual --cache_ignore data --screen --pretrained_ckpt Exp*/*-141538/weights/950000.tar --convert_to_onnx
