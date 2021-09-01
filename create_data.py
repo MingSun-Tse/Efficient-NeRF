@@ -659,7 +659,7 @@ def train():
                 print(f'[{i}/{args.n_pose_kd}] Saved data at "{datadir_kd_new}"')
                 data = [] # reset
 
-    elif args.create_data in ['rand_tworays']:
+    elif args.create_data in ['rand_tworays']: # for nerf_v4
         # set up data directory
         if os.path.exists(datadir_kd_new):
             if os.path.isfile(datadir_kd_new): 
@@ -737,6 +737,47 @@ def train():
                 print(f'[{i}/{args.n_pose_kd}] Saved data at "{datadir_kd_new}"')
                 data = [] # reset
 
-    
+    elif args.create_data in ['rand_images']: # for nerf_v6
+        # set up data directory
+        if os.path.exists(datadir_kd_new):
+            if os.path.isfile(datadir_kd_new): 
+                os.remove(datadir_kd_new)
+            else:
+                shutil.rmtree(datadir_kd_new)
+        os.makedirs(datadir_kd_new)
+        print('Set up new data directory, done!')
+        
+        # set up model
+        render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
+        render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
+        render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
+        render_kwargs_.pop('teacher_fn')
+        render_kwargs_.pop('teacher_fine')
+
+        # run
+        t0 = time.time()
+        timer = Timer(args.n_pose_kd // 10)
+        for i in range(1, args.n_pose_kd + 1):
+            pose = get_rand_pose()
+            focal_ = focal * (np.random.rand() + 1) # scale focal by [1, 2)
+            rays_o, rays_d = get_rays1(H, W, focal_, pose) # rays_o, rays_d shape: [H, W, 3]
+            batch_rays = torch.stack([rays_o, rays_d], 0)
+            rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
+                                            verbose=False, retraw=False,
+                                            **render_kwargs_)
+            data_ = torch.cat([rays_o, rays_d, rgb], dim=-1) # [H, W, 9]
+            print(f'[{i}/{args.n_pose_kd}] Using teacher to render more images... elapsed time: {(time.time() - t0):.2f}s')
+
+            # check pseudo images
+            if i <= 5:
+                filename = f'{datadir_kd_new}/pseudo_sample_{i}.png'
+                imageio.imwrite(filename, to8b(rgb))
+
+            # save
+            save_path = f'{datadir_kd_new}/{i}.npy'
+            np.save(save_path, data_.data.cpu().numpy())
+            if i % 10 == 0:
+                print(f'Predicted finish time: {timer()}')
+
 if __name__=='__main__':
     train()
