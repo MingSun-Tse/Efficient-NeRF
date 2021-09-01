@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.benchmark as benchmark
 # from torch.utils.tensorboard import SummaryWriter
-from model.nerf_raybased import NeRF, NeRF_v2, NeRF_v3, NeRF_v3_2, NeRF_v4, NeRF_v5
+from model.nerf_raybased import NeRF, NeRF_v2, NeRF_v3, NeRF_v3_2, NeRF_v4, NeRF_v5, NeRF_v6
 from model.nerf_raybased import PositionalEmbedder, PointSampler
 from model.enhance_cnn import EDSR
 from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder
@@ -39,9 +39,9 @@ from functools import partial
 get_rays1 = get_rays
 get_rays = partial(get_rays, trans_origin=args.trans_origin, focal_scale=args.focal_scale)
 
-dim_dir = dim_rgb = 3
+DIM_DIR = DIM_RGB = 3
 if args.model_name in ['nerf_v4']:
-    dim_dir = dim_rgb = 6
+    DIM_DIR = DIM_RGB = 6
 
 # ---------------------------------
 
@@ -165,7 +165,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = True
     render_kwargs['network_fn'].eval()
-    rgbs, disps, errors = [], [], []
+    rgbs, disps, errors, model_inputs = [], [], [], []
 
     for i, c2w in enumerate(render_poses):
         torch.cuda.synchronize()
@@ -174,7 +174,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         if args.model_name in ['nerf']:
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs) 
 
-        elif args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v4']:
+        elif args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v4', 'nerf_v6']:
             model = render_kwargs['network_fn']
             perturb = render_kwargs['perturb']
 
@@ -198,6 +198,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                     model_input = positional_embedder(point_sampler.sample_test(c2w))
                     torch.cuda.synchronize()
                     print(f'[01] {time.time() - t_:.4f}s -- after get model_input')
+                    model_inputs += [model_input]
                     
                     torch.cuda.synchronize()
                     t_ = time.time()
@@ -211,6 +212,12 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 with torch.no_grad():
                     rgb = model(rays_o, rays_d, rays_d2=None, scale=args.forward_scale, perturb=perturb, test=True)
                 rgb = torch.reshape(rgb, (H, W, 3))
+            
+            elif args.model_name in ['nerf_v6']:
+                model_input = positional_embedder(point_sampler.sample_test(c2w)) # [n_ray, embed_dim]
+                model_input = model_input.view(1, model_input.shape[-1], H, W)
+                with torch.no_grad():
+                    rgb = model(model_input).permute(0, 2, 3, 1) # [1, 3, H, W]
             
             # enhance
             if 'network_enhance' in render_kwargs:
@@ -233,11 +240,17 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             if len(errors):
                 imageio.imwrite(filename.replace('.png', '_error.png'), to8b(errors[-1]))
         
+        torch.cuda.synchronize()
         print(f'[#{i}] frame, rendering done, time for this frame: {time.time()-t0:.4f}s')
         print('')
     
     rgbs = torch.stack(rgbs, dim=0)
     disps = torch.stack(disps, dim=0)
+    ## save for nerf_v3.2, will be removed
+    # np.save('model_input.npy', torch.stack(model_inputs, dim=0).data.cpu().numpy()[5])
+    # np.save('model_output.npy', rgbs.data.cpu().numpy()[5])
+    # filename = 'model_output.png'
+    # imageio.imwrite(filename, to8b(rgbs[5]))
     
     if gt_imgs is not None:
         test_loss = img2mse(rgbs, gt_imgs)
@@ -262,11 +275,13 @@ def create_nerf(args, near, far):
     model_fine = network_query_fn = None
     global embed_fn
     embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
-
     input_ch_views = 0
     embeddirs_fn = None
     if args.use_viewdirs:
         embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
+
+    # @mst: use external positional embedding for our raybased nerf
+    global positional_embedder; positional_embedder = PositionalEmbedder(L=args.multires)
 
     grad_vars = []
     if args.model_name in ['nerf']:
@@ -313,7 +328,6 @@ def create_nerf(args, near, far):
         grad_vars += list(model.parameters())
     
     elif args.model_name in ['nerf_v3.2']:
-        global positional_embedder; positional_embedder = PositionalEmbedder(L=args.multires)
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
         model = NeRF_v3_2(args, input_dim).to(device)
         grad_vars += list(model.parameters())
@@ -324,6 +338,11 @@ def create_nerf(args, near, far):
 
     elif args.model_name in ['nerf_v5']:
         model = NeRF_v5(args, near, far).to(device)
+        grad_vars += list(model.parameters())
+    
+    elif args.model_name in ['nerf_v6']:
+        input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
+        model = NeRF_v6(args, input_dim).to(device)
         grad_vars += list(model.parameters())
 
     # in KD, there is a pretrained teacher
@@ -471,6 +490,18 @@ def create_nerf(args, near, far):
         print(f'Average forward time per image: {(t2-t0) / (n_iter * n_img):.4f}s')
         exit()
         n_flops = get_n_flops_(model, input=dummy_rays_o, count_adds=False) / (n_img * H * W)
+    
+    elif args.model_name in ['nerf_v6']:
+        if hasattr(model, 'module'): model = model.module
+        n_img, H, W = 1, 400, 400
+        dummy_input = torch.randn(n_img, model.input_dim, H, W).to(device)
+        torch.cuda.synchronize()
+        t0 = time.time()
+        with torch.no_grad():
+            model(dummy_input)
+        torch.cuda.synchronize()
+        print(f'Forward time per image: {time.time() - t0:.4f}s')
+        n_flops = get_n_flops_(model, input=dummy_input, count_adds=False) / (n_img * H * W)
 
     print(f'Model complexity per pixel: FLOPs {n_flops/1e6:.4f}M, Params {n_params/1e6:.4f}M')
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
@@ -729,7 +760,15 @@ def get_dataloader(dataset_type, datadir, pseudo_ratio=0.5):
                     sampler=InfiniteSamplerWrapper(len(trainset))
             )
         elif args.data_mode in ['rays']:
-            trainset = BlenderDataset_v2(datadir, pseudo_ratio, dim_dir=dim_dir, dim_rgb=dim_rgb)
+            trainset = BlenderDataset_v2(datadir, dim_dir=DIM_DIR, dim_rgb=DIM_RGB)
+            trainloader = torch.utils.data.DataLoader(dataset=trainset, 
+                    batch_size=args.N_rand,
+                    num_workers=args.num_workers,
+                    pin_memory=True,
+                    sampler=InfiniteSamplerWrapper(len(trainset))
+            )
+        elif args.data_mode in ['images_new']:
+            trainset = BlenderDataset_v2(datadir, rand_crop_size=args.rand_crop_size, img_H=IMG_H, img_W=IMG_W)
             trainloader = torch.utils.data.DataLoader(dataset=trainset, 
                     batch_size=args.N_rand,
                     num_workers=args.num_workers,
@@ -759,7 +798,10 @@ def get_pseudo_ratio(schedule, current_step):
 def save_onnx(model, onnx_path):
     model = copy.deepcopy(model)
     if hasattr(model, 'module'): model = model.module
-    dummy_input = torch.randn(1, model.input_dim).to(device)
+    if args.model_name in ['nerf_v3.2']:
+        dummy_input = torch.randn(1, model.input_dim).to(device)
+    if args.model_name in ['nerf_v6']:
+        dummy_input = torch.randn(1, model.input_dim, IMG_H, IMG_W).to(device)
     torch.onnx.export(model.cpu(),
                     dummy_input.cpu(),
                     onnx_path,
@@ -884,6 +926,8 @@ def train():
     hwf = [H, W, focal]
     k = math.sqrt(float(args.N_rand) / H / W)
     patch_h, patch_w = int(H * k), int(W * k)
+    global IMG_H; global IMG_W
+    IMG_H, IMG_W = H, W
 
     # set up sampler
     global point_sampler; point_sampler = PointSampler(H, W, focal, args.n_sample_per_ray, near, far)
@@ -1137,14 +1181,19 @@ def train():
                     target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 
                 elif args.data_mode in ['rays']:
-                    rays_o, rays_d, target_s = trainloader.next() # rays_o: [N_rand, 4096, 3] rays_d: [N_rand, 4096, dim_dir] target_s: [N_rand, 4096, dim_rgb]
+                    rays_o, rays_d, target_s = trainloader.next() # rays_o: [N_rand, 4096, 3] rays_d: [N_rand, 4096, DIM_DIR] target_s: [N_rand, 4096, DIM_RGB]
                     rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
                     rays_o = rays_o.view(-1, 3) # [N_rand*4096, 3]
-                    rays_d = rays_d.view(-1, dim_dir) # [N_rand*4096, dim_dir]
-                    target_s = target_s.view(-1, dim_rgb) # [N_rand*4096, dim_rgb]
+                    rays_d = rays_d.view(-1, DIM_DIR) # [N_rand*4096, DIM_DIR]
+                    target_s = target_s.view(-1, DIM_RGB) # [N_rand*4096, DIM_RGB]
                     if args.model_name in ['nerf_v4']: # in nerf_v4, load two rays each time
                         rays_d, rays_d2 = rays_d[:, :3], rays_d[:, 3:6] # [N_rand*4096, 3]
                         target_s, target_s2 = target_s[:, :3], target_s[:, 3:6] # [N_rand*4096, 3]
+                
+                elif args.data_mode in ['images_new']:
+                    rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, crop_size, crop_size, 3]
+                    rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
+                    target_s = target_s.permute(0, 3, 1, 2) # [N_rand, 3, crop_size, crop_size]
             
             batch_size = rays_o.shape[0]
             if args.hard_ratio:
@@ -1196,6 +1245,16 @@ def train():
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
                 rgb, rgb2 = model(rays_o, rays_d, rays_d2, scale=args.forward_scale, perturb=perturb)
+            
+            elif args.model_name in ['nerf_v6']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                shape = rays_o.shape
+                pts = point_sampler.sample_train(rays_o.view(-1, 3), rays_d.view(-1, 3), perturb=perturb)
+                pts = positional_embedder(pts) # [N_rand*crop_size*crop_size, embed_dim]
+                pts = pts.view(shape[0], shape[1], shape[2], -1) # [N_rand, crop_size, crop_size, embed_dim]
+                pts = pts.permute(0, 3, 1, 2) # [N_rand, embed_dim, crop_size, crop_size]
+                rgb = model(pts) # [N_rand, 3, crop_size, crop_size]
             
             # rgb loss
             loss_rgb = img2mse(rgb, target_s)

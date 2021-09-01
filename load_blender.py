@@ -222,18 +222,31 @@ class BlenderDataset(Dataset):
 class BlenderDataset_v2(Dataset):
     '''Load data of ray origins and directions. This is the most straight way.
     '''
-    def __init__(self, datadir, pseudo_ratio=0.5, dim_dir=3, dim_rgb=3):
+    def __init__(self, datadir, dim_dir=3, dim_rgb=3, rand_crop_size=-1, img_H=0, img_W=0):
         self.datadir = datadir
         all_splits = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('.npy')]
         self.all_splits = all_splits
         self.dim_dir = dim_dir
         self.dim_rgb = dim_rgb
+        self.rand_crop_size = rand_crop_size
+        self.img_H = img_H
+        self.img_W = img_W
         print(f'Load data done. #All files: {len(self.all_splits)}')
 
+    def _square_rand_bbox(self):
+        bbx1 = np.random.randint(0, self.img_W - self.rand_crop_size + 1)
+        bby1 = np.random.randint(0, self.img_H - self.rand_crop_size + 1)
+        return bbx1, bby1, bbx1 + self.rand_crop_size, bby1 + self.rand_crop_size
+
     def __getitem__(self, index):
-        d = np.load(self.all_splits[index])
-        d = torch.Tensor(d)
-        return d[:, :3], d[:, 3:3+self.dim_dir], d[:, 3+self.dim_dir:3+self.dim_dir+self.dim_rgb]
+        d = np.load(self.all_splits[index]) # [H, W, 9] or [n_ray, 9]
+        d = torch.Tensor(d) # [H, W, 9] or [n_ray, 9]
+
+        if self.rand_crop_size > 0:
+            bbx1, bby1, bbx2, bby2 = self._square_rand_bbox()
+            d = d[bby1:bby2, bbx1:bbx2, :]
+
+        return d[..., :3], d[..., 3:3+self.dim_dir], d[..., 3+self.dim_dir:3+self.dim_dir+self.dim_rgb]
     
     def __len__(self):
         return len(self.all_splits)

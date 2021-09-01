@@ -503,7 +503,39 @@ class NeRF_v3(nn.Module):
         h = self.body(h) + h if self.args.use_residual else self.body(h)
         rgb = self.tail(h)
         return rgb, rgb
+
+class NeRF_v3_2(nn.Module):
+    '''Based on NeRF_v3, move positional embedding out'''
+    def __init__(self, args, input_dim):
+        super(NeRF_v3_2, self).__init__()
+        self.args = args
+        D, W = args.netdepth, args.netwidth
+
+        # get network width
+        if args.layerwise_netwidths:
+            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
+            print('Layer-wise widths are given. Overwrite args.netwidth')
+        else:
+            Ws = [W] * (D-1) + [3]
+
+        # head
+        self.input_dim = input_dim
+        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU(inplace=True)])
+        
+        # body
+        body = []
+        for i in range(1, D-1):
+            body += [nn.Linear(Ws[i-1], Ws[i]), nn.ReLU(inplace=True)]
+        self.body = nn.Sequential(*body)
+        
+        # tail
+        self.tail = nn.Linear(input_dim, 3) if args.linear_tail else nn.Sequential(*[nn.Linear(Ws[D-2], 3), nn.Sigmoid()])
     
+    def forward(self, x): # x: embedded position coordinates
+        x = self.head(x)
+        x = self.body(x) + x if self.args.use_residual else self.body(x)
+        return self.tail(x)
+
 class NeRF_v4(nn.Module):
     '''Spatial sharing'''
     def __init__(self, args, near, far):
@@ -710,34 +742,35 @@ class NeRF_v5(nn.Module):
         x = self.body(x) + x if self.args.use_residual else self.body(x)
         return self.tail(x)
 
-class NeRF_v3_2(nn.Module):
-    '''Based on NeRF_v3, move positional embedding out'''
+class NeRF_v6(nn.Module):
+    '''Based on NeRF_v5, use 3x3 conv'''
     def __init__(self, args, input_dim):
-        super(NeRF_v3_2, self).__init__()
+        super(NeRF_v6, self).__init__()
         self.args = args
         D, W = args.netdepth, args.netwidth
 
-        # get network width
+        # network width
         if args.layerwise_netwidths:
             Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
             print('Layer-wise widths are given. Overwrite args.netwidth')
         else:
-            Ws = [W] * (D-1) + [3]
-
+            Ws = [W] * (D - 1) + [3]
+        
         # head
         self.input_dim = input_dim
-        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU(inplace=True)])
+        self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=3, padding=1), nn.ReLU(inplace=True)])
         
         # body
         body = []
-        for i in range(1, D-1):
-            body += [nn.Linear(Ws[i-1], Ws[i]), nn.ReLU(inplace=True)]
+        for i in range(1, D - 1):
+            body += [nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=3, padding=1), nn.ReLU(inplace=True)]
         self.body = nn.Sequential(*body)
         
         # tail
-        self.tail = nn.Linear(input_dim, 3) if args.linear_tail else nn.Sequential(*[nn.Linear(Ws[D-2], 3), nn.Sigmoid()])
-    
-    def forward(self, x): # x: embedded position coordinates
+        self.tail = nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=3, padding=1) if args.linear_tail \
+            else nn.Sequential(*[nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=3, padding=1), nn.Sigmoid()])
+        
+    def forward(self, x):
         x = self.head(x)
         x = self.body(x) + x if self.args.use_residual else self.body(x)
         return self.tail(x)
