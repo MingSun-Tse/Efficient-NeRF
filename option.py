@@ -198,6 +198,7 @@ parser.add_argument('--convert_to_onnx', action='store_true')
 parser.add_argument('--benchmark', action='store_true',
         help='check inference speed (time of rendering a frame) with a trained model')
 parser.add_argument('--rand_crop_size', type=int, default=-1)
+parser.add_argument('--share_pixels', type=int, default=9)
 args = parser.parse_args()
 
 if args.video_tag == '':

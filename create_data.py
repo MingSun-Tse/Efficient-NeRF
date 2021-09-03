@@ -779,7 +779,7 @@ def train():
             if i % 10 == 0:
                 print(f'Predicted finish time: {timer()}')
     
-    elif args.create_data in ['3x3rays']: # for nerf_v7
+    elif args.create_data in ['3x3rays']: # for nerf_v3.4
         # set up data directory
         if os.path.exists(datadir_kd_new):
             if os.path.isfile(datadir_kd_new): 

@@ -576,6 +576,39 @@ class NeRF_v3_3(nn.Module):
         x = x.view(3, -1).permute(1, 0) # [n_ray, 3]
         return x
 
+class NeRF_v3_4(nn.Module):
+    '''Based on NeRF_v3.2, 3x3 rays share one network'''
+    def __init__(self, args, input_dim, share_pixels):
+        super(NeRF_v3_4, self).__init__()
+        self.args = args
+        D, W = args.netdepth, args.netwidth
+
+        # get network width
+        if args.layerwise_netwidths:
+            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
+            print('Layer-wise widths are given. Overwrite args.netwidth')
+        else:
+            Ws = [W] * (D-1) + [3]
+
+        # head
+        self.input_dim = input_dim * share_pixels
+        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU(inplace=True)])
+        
+        # body
+        body = []
+        for i in range(1, D-1):
+            body += [nn.Linear(Ws[i-1], Ws[i]), nn.ReLU(inplace=True)]
+        self.body = nn.Sequential(*body)
+        
+        # tail
+        self.tail = nn.Linear(input_dim, 3 * share_pixels) if args.linear_tail \
+            else nn.Sequential(*[nn.Linear(Ws[D-2], 3 * share_pixels), nn.Sigmoid()])
+    
+    def forward(self, x): # x: embedded position coordinates
+        x = self.head(x)
+        x = self.body(x) + x if self.args.use_residual else self.body(x)
+        return self.tail(x)
+
 class NeRF_v4(nn.Module):
     '''Spatial sharing'''
     def __init__(self, args, near, far):

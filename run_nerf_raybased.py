@@ -348,6 +348,11 @@ def create_nerf(args, near, far):
         model = NeRF_v3_3(args, input_dim).to(device)
         grad_vars += list(model.parameters())
 
+    elif args.model_name in ['nerf_v3.4']:
+        input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
+        model = NeRF_v3_4(args, input_dim, args.share_pixels).to(device)
+        grad_vars += list(model.parameters())
+
     elif args.model_name in ['nerf_v4']:
         model = NeRF_v4(args, near, far).to(device)
         grad_vars += list(model.parameters())
@@ -477,6 +482,10 @@ def create_nerf(args, near, far):
 
     elif args.model_name in ['nerf_v3.2']:
         dummy_input = torch.randn(1, model.input_dim).to(device)
+        n_flops = get_n_flops_(model, input=dummy_input, count_adds=False)
+
+    elif args.model_name in ['nerf_v3.4']:
+        dummy_input = torch.randn(1, model.input_dim * args.share_pixels).to(device)
         n_flops = get_n_flops_(model, input=dummy_input, count_adds=False)
 
     elif args.model_name in ['nerf_v3.3', 'nerf_v6']:
