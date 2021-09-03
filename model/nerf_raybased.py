@@ -536,6 +536,46 @@ class NeRF_v3_2(nn.Module):
         x = self.body(x) + x if self.args.use_residual else self.body(x)
         return self.tail(x)
 
+class NeRF_v3_3(nn.Module):
+    '''Use 1x1 conv to implement NeRF_v3_2. Keep the input data the same as that of NeRF_v3_2.'''
+    def __init__(self, args, input_dim):
+        super(NeRF_v3_3, self).__init__()
+        self.args = args
+        D, W = args.netdepth, args.netwidth
+
+        # network width
+        if args.layerwise_netwidths:
+            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
+            print('Layer-wise widths are given. Overwrite args.netwidth')
+        else:
+            Ws = [W] * (D - 1) + [3]
+        
+        # head
+        self.input_dim = input_dim
+        self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=1), nn.ReLU(inplace=True)])
+        
+        # body
+        body = []
+        for i in range(1, D - 1):
+            body += [nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=1), nn.ReLU(inplace=True)]
+        self.body = nn.Sequential(*body)
+        
+        # tail
+        self.tail = nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=1) if args.linear_tail \
+            else nn.Sequential(*[nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=1), nn.Sigmoid()])
+        
+    def forward(self, x): # x: [n_img, embed_dim, H, W]
+        x = self.head(x)
+        x = self.body(x) + x if self.args.use_residual else self.body(x)
+        return self.tail(x) # [n_img, 3, H, W]
+
+    def forward_mlp(self, x): # x: embedded position coordinates, [n_ray, input_dim]
+        x = x.permute(1, 0) # [input_dim, n_ray]
+        x = x.view(1, x.shape[0], x.shape[1]//32, -1) # [1, input_dim, H, W]
+        x = self.forward(x)
+        x = x.view(3, -1).permute(1, 0) # [n_ray, 3]
+        return x
+
 class NeRF_v4(nn.Module):
     '''Spatial sharing'''
     def __init__(self, args, near, far):
@@ -696,52 +736,6 @@ class NeRF_v4(nn.Module):
         rgbs = torch.cat(rgbs, dim=-1) # [n_ray, n_pixel*3]
         return rgbs
 
-class NeRF_v5(nn.Module):
-    '''Use 1x1 conv to implement MLP in nerf'''
-    def __init__(self, args, near, far):
-        super(NeRF_v5, self).__init__()
-        self.args = args
-        self.near = near
-        self.far = far
-        assert args.n_sample_per_ray >= 1
-        n_sample = args.n_sample_per_ray
-        D, W = args.netdepth, args.netwidth
-
-        # positional embedding function
-        self.embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
-        if args.use_viewdirs:
-            self.embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
-
-        # network width
-        if args.layerwise_netwidths:
-            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
-            print('Layer-wise widths are given. Overwrite args.netwidth')
-        else:
-            Ws = [W] * (D - 1) + [3]
-        
-        input_dim = input_ch + input_ch_views if args.use_viewdirs else input_ch
-        input_dim *= n_sample
-
-        # head
-        self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=1), nn.ReLU(inplace=True)])
-        
-        # body
-        body = []
-        for i in range(1, D - 1):
-            body += [nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=1), nn.ReLU(inplace=True)]
-        self.body = nn.Sequential(*body)
-        
-        # tail
-        if args.linear_tail:
-            self.tail = nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=1)
-        else:
-            self.tail = nn.Sequential(*[nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=1), nn.Sigmoid()])
-        
-    def forward(self, x):
-        x = self.head(x)
-        x = self.body(x) + x if self.args.use_residual else self.body(x)
-        return self.tail(x)
-
 class NeRF_v6(nn.Module):
     '''Based on NeRF_v5, use 3x3 conv'''
     def __init__(self, args, input_dim):
@@ -757,18 +751,19 @@ class NeRF_v6(nn.Module):
             Ws = [W] * (D - 1) + [3]
         
         # head
+        ks, pd = 1, 0
         self.input_dim = input_dim
-        self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=3, padding=1), nn.ReLU(inplace=True)])
+        self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=ks, padding=pd), nn.ReLU(inplace=True)])
         
         # body
         body = []
         for i in range(1, D - 1):
-            body += [nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=3, padding=1), nn.ReLU(inplace=True)]
+            body += [nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=ks, padding=pd), nn.ReLU(inplace=True)]
         self.body = nn.Sequential(*body)
         
         # tail
-        self.tail = nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=3, padding=1) if args.linear_tail \
-            else nn.Sequential(*[nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=3, padding=1), nn.Sigmoid()])
+        self.tail = nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=ks, padding=pd) if args.linear_tail \
+            else nn.Sequential(*[nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=ks, padding=pd), nn.Sigmoid()])
         
     def forward(self, x):
         x = self.head(x)
