@@ -413,10 +413,10 @@ class NeRF_v3(nn.Module):
 
         # network
         if args.layerwise_netwidths:
-            Ws = [int(x) for x in args.layerwise_netwidths.split(',')]
+            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
             print('Layer-wise widths are given. Overwrite args.netwidth')
         else:
-            Ws = [W] * (D - 1)
+            Ws = [W] * (D - 1) + [3]
         
         input_dim = input_ch + input_ch_views if args.use_viewdirs else input_ch 
         input_dim *= n_sample

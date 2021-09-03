@@ -199,18 +199,9 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             
             elif args.model_name in ['nerf_v3.2']:
                 with torch.no_grad():
-                    torch.cuda.synchronize()
-                    t_ = time.time()
                     model_input = positional_embedder(point_sampler.sample_test(c2w))
-                    torch.cuda.synchronize()
-                    print(f'[01] {time.time() - t_:.4f}s -- after get model_input')
-                    model_inputs += [model_input]
-                    
-                    torch.cuda.synchronize()
-                    t_ = time.time()
                     rgb = model(model_input)
-                    torch.cuda.synchronize()
-                    print(f'[02] {time.time() - t_:.4f}s -- after model forward')
+                    model_inputs += [model_input]
             
             elif args.model_name in ['nerf_v3.3']:
                 with torch.no_grad():
