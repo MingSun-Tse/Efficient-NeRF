@@ -447,7 +447,6 @@ class NeRF_v3(nn.Module):
         t0 = time.time()
         if n_sample > 1:
             t_vals = self.t_vals
-            print(f'Inside model forward [00] {time.time() - t0:.4f}s -- after getting t_vals')
             t_vals = t_vals[None, :].expand(n_ray, n_sample)
             z_vals = self.near * (1 - t_vals) + self.far * (t_vals)
             if perturb > 0.:
@@ -466,7 +465,6 @@ class NeRF_v3(nn.Module):
             embedded_pts = self.embed_fn(pts.view(-1, 3)) # shape: [n_ray*n_sample_per_ray, 63]
             embedded_pts = embedded_pts.view(rays_o.size(0), -1) # [n_ray, n_sample_per_ray*63]
 
-            print(f'Inside model forward [01] {time.time() - t0:.4f}s -- after positional encoding of origins')
             # pose embedding
             if self.args.use_viewdirs:
                 # provide ray directions as input
@@ -488,13 +486,10 @@ class NeRF_v3(nn.Module):
                 embedded_dirs = self.embeddirs_fn(rays_d / rays_d.norm(dim=-1, keepdim=True)) # [n_ray, 27]
                 embedded_pts = torch.cat([embedded_pts, embedded_dirs], dim=-1)
 
-        print(f'Inside model forward [02] {time.time() - t0:.4f}s -- after positional encoding of directions')
         # network forward
         h = self.head(embedded_pts)
         h = self.body(h) + h if self.args.use_residual else self.body(h)
         rgb = self.tail(h)
-        # rgb = torch.ones(n_ray, 3)
-        print(f'Inside model forward [03] {time.time() - t0:.4f}s -- after network forward')
         return rgb, rgb
     
     def forward_(self, embedded_pts):

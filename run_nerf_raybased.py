@@ -411,9 +411,10 @@ def create_nerf(args, near, far):
 
     # use DataParallel
     if not args.render_only: # when rendering, use just one GPU
-        model = MyDataParallel(model)
+        model = nn.DataParallel(model)
         if model_fine is not None:
-            model_fine = MyDataParallel(model_fine)
+            model_fine = nn.DataParallel(model_fine)
+        if hasattr(model.module, 'input_dim'): model.input_dim = model.module.input_dim
 
     # pruning, before 'render_kwargs_train'
     if args.model_name in ['nerf_v2', 'nerf_v3'] and args.pruner:
@@ -1382,21 +1383,21 @@ def train():
                 'global_step': global_step,
                 'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'network_fn': render_kwargs_train['network_fn'],
             }
             if args.model_name in ['nerf'] and args.N_importance > 0:
-                to_save['network_fn'] = render_kwargs_train['network_fine'],
                 to_save['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
+            if args.model_name in ['nerf_v3.2']:
+                to_save['network_fn'] = render_kwargs_train['network_fn']
             if args.enhance_cnn:
                 to_save['network_enhance'] = render_kwargs_train['network_enhance'],
                 to_save['network_enhance_state_dict'] = render_kwargs_train['network_enhance'].state_dict()
             torch.save(to_save, path)
             save_log = f'Iter {i} Save checkpoint: "{path}"'
             
-            # convert to onnx
-            onnx_path = path.replace('.tar', '.onnx')
-            save_onnx(model, onnx_path)
-            save_log += f', onnx saved at "{onnx_path}"'
+            # # convert to onnx
+            # onnx_path = path.replace('.tar', '.onnx')
+            # save_onnx(model, onnx_path)
+            # save_log += f', onnx saved at "{onnx_path}"'
             print(save_log)
 
 if __name__=='__main__':
