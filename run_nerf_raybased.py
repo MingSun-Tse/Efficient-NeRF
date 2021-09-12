@@ -201,7 +201,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 with torch.no_grad():
                     model_input = positional_embedder(point_sampler.sample_test(c2w))
                     rgb = model(model_input)
-                    model_inputs += [model_input]
+                    # model_inputs += [model_input]
             
             elif args.model_name in ['nerf_v3.3']:
                 with torch.no_grad():
