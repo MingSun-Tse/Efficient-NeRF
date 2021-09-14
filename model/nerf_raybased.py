@@ -565,6 +565,8 @@ class NeRF_v3_3(nn.Module):
         return self.tail(x) # [n_img, 3, H, W]
 
     def forward_mlp(self, x): # x: embedded position coordinates, [n_ray, input_dim]
+        '''The input data format is for MLP network. To keep the data preparation the same as before.
+        '''
         x = x.permute(1, 0) # [input_dim, n_ray]
         x = x.view(1, x.shape[0], x.shape[1]//32, -1) # [1, input_dim, H, W]
         x = self.forward(x)
@@ -572,7 +574,7 @@ class NeRF_v3_3(nn.Module):
         return x
 
 class NeRF_v3_4(nn.Module):
-    '''Based on NeRF_v3.2, 3x3 rays share one network'''
+    '''Based on NeRF_v3.2, 3x3 rays share one network -- Deprecated'''
     def __init__(self, args, input_dim, share_pixels):
         super(NeRF_v3_4, self).__init__()
         self.args = args
@@ -596,7 +598,7 @@ class NeRF_v3_4(nn.Module):
         self.body = nn.Sequential(*body)
         
         # tail
-        self.tail = nn.Linear(input_dim, 3 * share_pixels) if args.linear_tail \
+        self.tail = nn.Linear(Ws[D-2], 3 * share_pixels) if args.linear_tail \
             else nn.Sequential(*[nn.Linear(Ws[D-2], 3 * share_pixels), nn.Sigmoid()])
     
     def forward(self, x): # x: embedded position coordinates
@@ -604,8 +606,88 @@ class NeRF_v3_4(nn.Module):
         x = self.body(x) + x if self.args.use_residual else self.body(x)
         return self.tail(x)
 
+class Upsampler(nn.Sequential):
+    '''refers to https://github.com/yulunzhang/RCAN/blob/3339ebc59519c3bb2b5719b87dd36515ec7f3ba7/RCAN_TrainCode/code/model/common.py#L58
+    '''
+    def __init__(self, conv, scale, n_feat, kernel_size=3, bn=False, act=False, bias=True):
+        m = []
+        if (scale & (scale - 1)) == 0:    # Is scale = 2^n?
+            for _ in range(int(math.log(scale, 2))):
+                m.append(conv(n_feat, 4 * n_feat, kernel_size, bias))
+                m.append(nn.PixelShuffle(2))
+                if bn: m.append(nn.BatchNorm2d(n_feat))
+                if act: m.append(act())
+        elif scale == 3:
+            m.append(conv(n_feat, 9 * n_feat, kernel_size, bias))
+            m.append(nn.PixelShuffle(3))
+            if bn: m.append(nn.BatchNorm2d(n_feat))
+            if act: m.append(act())
+        else:
+            raise NotImplementedError
+
+        super(Upsampler, self).__init__(*m)
+
+class NeRF_v3_5(nn.Module):
+    '''Based on NeRF_v3.2, 3x3 rays share one network. Use Conv and ShufflePixel'''
+    def __init__(self, args, input_dim, scale=3):
+        super(NeRF_v3_5, self).__init__()
+        self.args = args
+        D, W = args.netdepth, args.netwidth
+
+        # get network width
+        if args.layerwise_netwidths:
+            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
+            print('Layer-wise widths are given. Overwrite args.netwidth')
+        else:
+            Ws = [W] * (D-1) + [3]
+
+        # head: downsize by scale
+        self.input_dim = input_dim
+        self.head = nn.Sequential(*[nn.Conv2d(input_dim, Ws[0], kernel_size=scale, stride=scale), nn.ReLU(inplace=True)]) 
+        
+        # body (keep the feature map size)
+        body = []
+        for i in range(1, D-1):
+            body += [nn.Conv2d(Ws[i-1], Ws[i], kernel_size=1), nn.ReLU(inplace=True)]
+        self.body = nn.Sequential(*body)
+        
+        # tail: upsample by scale
+        conv = lambda in_channels, out_channels, kernel_size, bias: nn.Conv2d(in_channels, out_channels, kernel_size,
+            padding=(kernel_size//2), bias=bias)
+        act = False if args.linear_tail else nn.Sigmoid
+        self.tail = nn.Sequential(*[
+            Upsampler(conv, scale, Ws[i], kernel_size=1, act=act),
+            conv(Ws[i], 3, kernel_size=1, bias=True)
+        ])
+    
+    def forward(self, x): # x: embedded position coordinates
+        '''if body is nn.Linear'''
+        x = self.head(x) # [1, dim, H//scale, W//scale]
+        shape = x.shape
+        x = x.permute(0, 2, 3, 1) # [1, H//scale, W//scale, dim]
+        x = x.view(-1, shape[1])
+        x = self.body(x) # [1*H//scale*W//scale, dim]
+        x = x.permute(1, 0)
+        x = x.view(shape) # [1, dim, H//scale, W//scale]
+        return self.tail(x) # [1, 3, H, W]
+    
+    def forward(self, x):
+        '''if body is 1x1 conv'''
+        x = self.head(x) 
+        x = self.body(x) 
+        return self.tail(x)
+    
+    def forward_mlp(self, x): # x: embedded position coordinates, [n_ray, input_dim]
+        '''The input data format is for MLP network. To keep the data preparation the same as before.
+        '''
+        x = x.permute(1, 0) # [input_dim, n_ray]
+        x = x.view(1, x.shape[0], x.shape[1]//32, -1) # [1, input_dim, H, W] TODO-@mst: hardcode 400, improve.
+        x = self.forward(x)
+        x = x.view(3, -1).permute(1, 0) # [n_ray, 3]
+        return x
+
 class NeRF_v4(nn.Module):
-    '''Spatial sharing'''
+    '''Spatial sharing. Two rays'''
     def __init__(self, args, near, far):
         super(NeRF_v4, self).__init__()
         self.args = args
@@ -764,6 +846,7 @@ class NeRF_v4(nn.Module):
         rgbs = torch.cat(rgbs, dim=-1) # [n_ray, n_pixel*3]
         return rgbs
 
+NeRF_v5 = NeRF_v3_3 # to maintain back-compatibility
 class NeRF_v6(nn.Module):
     '''Based on NeRF_v5, use 3x3 conv'''
     def __init__(self, args, input_dim):

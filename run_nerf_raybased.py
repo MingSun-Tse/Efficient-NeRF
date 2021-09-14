@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.benchmark as benchmark
 # from torch.utils.tensorboard import SummaryWriter
-from model.nerf_raybased import NeRF, NeRF_v2, NeRF_v3, NeRF_v3_2, NeRF_v3_3, NeRF_v4, NeRF_v6
+from model.nerf_raybased import NeRF, NeRF_v2, NeRF_v3, NeRF_v3_2, NeRF_v3_3, NeRF_v3_4, NeRF_v3_5, NeRF_v4, NeRF_v6
 from model.nerf_raybased import PositionalEmbedder, PointSampler
 from model.enhance_cnn import EDSR
 from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder
@@ -180,7 +180,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         if args.model_name in ['nerf']:
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs) 
 
-        elif args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v4', 'nerf_v6']:
+        elif args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.5', 'nerf_v4', 'nerf_v6']:
             model = render_kwargs['network_fn']
             perturb = render_kwargs['perturb']
 
@@ -203,7 +203,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                     rgb = model(model_input)
                     # model_inputs += [model_input]
             
-            elif args.model_name in ['nerf_v3.3']:
+            elif args.model_name in ['nerf_v3.3', 'nerf_v3.5']:
                 with torch.no_grad():
                     model_input = positional_embedder(point_sampler.sample_test(c2w))
                     rgb = model.forward_mlp(model_input)
@@ -344,6 +344,11 @@ def create_nerf(args, near, far):
         model = NeRF_v3_4(args, input_dim, args.share_pixels).to(device)
         grad_vars += list(model.parameters())
 
+    elif args.model_name in ['nerf_v3.5']:
+        input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
+        model = NeRF_v3_5(args, input_dim, scale=args.scale).to(device)
+        grad_vars += list(model.parameters())
+
     elif args.model_name in ['nerf_v4']:
         model = NeRF_v4(args, near, far).to(device)
         grad_vars += list(model.parameters())
@@ -411,9 +416,9 @@ def create_nerf(args, near, far):
 
     # use DataParallel
     if not args.render_only: # when rendering, use just one GPU
-        model = nn.DataParallel(model)
+        model = MyDataParallel(model)
         if model_fine is not None:
-            model_fine = nn.DataParallel(model_fine)
+            model_fine = MyDataParallel(model_fine)
         if hasattr(model.module, 'input_dim'): model.input_dim = model.module.input_dim
 
     # pruning, before 'render_kwargs_train'
@@ -479,6 +484,11 @@ def create_nerf(args, near, far):
     elif args.model_name in ['nerf_v3.4']:
         dummy_input = torch.randn(1, model.input_dim * args.share_pixels).to(device)
         n_flops = get_n_flops_(model, input=dummy_input, count_adds=False)
+
+    elif args.model_name in ['nerf_v3.5']:
+        n_img, H, W = 1, 400, 400
+        dummy_input = torch.randn(n_img, model.input_dim, H, W).to(device) # CNN-style input
+        n_flops = get_n_flops_(model, input=dummy_input, count_adds=False) / (n_img * H * W)
 
     elif args.model_name in ['nerf_v3.3', 'nerf_v6']:
         n_img, H, W = 1, 400, 400
@@ -1238,6 +1248,12 @@ def train():
                 rgb = model(positional_embedder(pts))
 
             elif args.model_name in ['nerf_v3.3']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
+                rgb = model.forward_mlp(positional_embedder(pts))
+
+            elif args.model_name in ['nerf_v3.5']:
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
                 pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
