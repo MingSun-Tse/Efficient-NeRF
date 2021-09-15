@@ -206,7 +206,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             elif args.model_name in ['nerf_v3.3', 'nerf_v3.5']:
                 with torch.no_grad():
                     model_input = positional_embedder(point_sampler.sample_test(c2w))
-                    rgb = model.forward_mlp(model_input)
+                    rgb = model.forward_mlp(model_input, img_h=H, img_w=W)
             
             elif args.model_name in ['nerf_v4']:
                 rays_o = torch.reshape(rays_o, (-1, args.num_shared_pixels * 3))
@@ -227,7 +227,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 rgb = model_enhance(rgb, h=H, w=W)
 
             # reshape to image
-            rgb = rgb.view(H, W, 3)
+            rgb = rgb.view(399, 399, 3)
             disp = rgb # placeholder, to maintain compability
   
         rgbs.append(rgb)
@@ -1199,7 +1199,9 @@ def train():
                 elif args.data_mode in ['images_new']:
                     rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, crop_size, crop_size, 3]
                     rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
-                    target_s = target_s.permute(0, 3, 1, 2) # [N_rand, 3, crop_size, crop_size]
+                    rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3) # [N_rand*crop_size*crop_size, 3]
+                    target_s = target_s.view(-1, 3) 
+                    # target_s = target_s.permute(0, 3, 1, 2) # [N_rand, 3, crop_size, crop_size]
             
             batch_size = rays_o.shape[0]
             if args.hard_ratio:
@@ -1256,8 +1258,12 @@ def train():
             elif args.model_name in ['nerf_v3.5']:
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
+                if args.rand_crop_size > 0:
+                    img_h = img_w = args.rand_crop_size
+                else:
+                    img_h, img_w = IMG_H, IMG_W
                 pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
-                rgb = model.forward_mlp(positional_embedder(pts))
+                rgb = model.forward_mlp(positional_embedder(pts), img_h=img_h, img_w=img_w)
 
             elif args.model_name in ['nerf_v4']:
                 model = render_kwargs_train['network_fn']

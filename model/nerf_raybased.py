@@ -660,16 +660,16 @@ class NeRF_v3_5(nn.Module):
             conv(Ws[i], 3, kernel_size=1, bias=True)
         ])
     
-    def forward(self, x): # x: embedded position coordinates
-        '''if body is nn.Linear'''
-        x = self.head(x) # [1, dim, H//scale, W//scale]
-        shape = x.shape
-        x = x.permute(0, 2, 3, 1) # [1, H//scale, W//scale, dim]
-        x = x.view(-1, shape[1])
-        x = self.body(x) # [1*H//scale*W//scale, dim]
-        x = x.permute(1, 0)
-        x = x.view(shape) # [1, dim, H//scale, W//scale]
-        return self.tail(x) # [1, 3, H, W]
+    # def forward(self, x): # x: embedded position coordinates
+    #     '''if body is nn.Linear'''
+    #     x = self.head(x) # [1, dim, H//scale, W//scale]
+    #     shape = x.shape
+    #     x = x.permute(0, 2, 3, 1) # [1, H//scale, W//scale, dim]
+    #     x = x.view(-1, shape[1])
+    #     x = self.body(x) # [1*H//scale*W//scale, dim]
+    #     x = x.permute(1, 0)
+    #     x = x.view(shape) # [1, dim, H//scale, W//scale]
+    #     return self.tail(x) # [1, 3, H, W]
     
     def forward(self, x):
         '''if body is 1x1 conv'''
@@ -677,13 +677,25 @@ class NeRF_v3_5(nn.Module):
         x = self.body(x) 
         return self.tail(x)
     
-    def forward_mlp(self, x): # x: embedded position coordinates, [n_ray, input_dim]
+    def forward_mlp(self, x, img_h, img_w): # x: embedded position coordinates, [n_ray, input_dim]
         '''The input data format is for MLP network. To keep the data preparation the same as before.
         '''
-        x = x.permute(1, 0) # [input_dim, n_ray]
-        x = x.view(1, x.shape[0], x.shape[1]//32, -1) # [1, input_dim, H, W] TODO-@mst: hardcode 400, improve.
-        x = self.forward(x)
-        x = x.view(3, -1).permute(1, 0) # [n_ray, 3]
+        torch.cuda.synchronize()
+        t0 = time.time()
+        x = x.view(-1, img_h, img_w, x.shape[1]) # [n_img, H, W, input_dim]
+        x = x.permute(0, 3, 1, 2) # [n_img, input_dim, H, W]
+        torch.cuda.synchronize()
+        print(f'permute1: {time.time() - t0:.6f}s')
+        
+        x = self.forward(x) # [n_img, 3, H, W]
+        torch.cuda.synchronize()
+        print(f'forward: {time.time() - t0:.6f}s')
+        
+        x = x.permute(0, 2, 3, 1) # [n_img, H, W, 3]
+        x = x.reshape(-1, 3) # [n_ray, 3]
+        
+        torch.cuda.synchronize()
+        print(f'permute2: {time.time() - t0:.6f}s')
         return x
 
 class NeRF_v4(nn.Module):
