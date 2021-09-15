@@ -643,14 +643,14 @@ class NeRF_v3_5(nn.Module):
 
         # head: downsize by scale
         self.input_dim = input_dim
-        self.head = nn.Sequential(*[nn.Conv2d(input_dim, Ws[0], kernel_size=scale, stride=scale), nn.ReLU(inplace=True)]) 
+        self.head = nn.Sequential(*[nn.Conv2d(input_dim, Ws[0], kernel_size=scale, stride=scale), nn.ReLU(inplace=True)])
         
         # body (keep the feature map size)
         body = []
         for i in range(1, D-1):
             body += [nn.Conv2d(Ws[i-1], Ws[i], kernel_size=1), nn.ReLU(inplace=True)]
         self.body = nn.Sequential(*body)
-        
+
         # tail: upsample by scale
         conv = lambda in_channels, out_channels, kernel_size, bias: nn.Conv2d(in_channels, out_channels, kernel_size,
             padding=(kernel_size//2), bias=bias)
@@ -659,7 +659,13 @@ class NeRF_v3_5(nn.Module):
             Upsampler(conv, scale, Ws[i], kernel_size=1, act=act),
             conv(Ws[i], 3, kernel_size=1, bias=True)
         ])
-    
+
+        # ###################### same network implemented by FC layers
+        body_fc = []
+        for i in range(1, D-1):
+            body_fc += [nn.Linear(Ws[i-1], Ws[i]), nn.ReLU(inplace=True)]
+        self.body_fc = nn.Sequential(*body_fc)
+
     # def forward(self, x): # x: embedded position coordinates
     #     '''if body is nn.Linear'''
     #     x = self.head(x) # [1, dim, H//scale, W//scale]
@@ -673,29 +679,51 @@ class NeRF_v3_5(nn.Module):
     
     def forward(self, x):
         '''if body is 1x1 conv'''
+        torch.cuda.synchronize()
+        t0 = time.time()
         x = self.head(x) 
+        torch.cuda.synchronize()
+        print(f'after head: {time.time() - t0:.6f}s')
         x = self.body(x) 
-        return self.tail(x)
+        torch.cuda.synchronize()
+        print(f'after body: {time.time() - t0:.6f}s')
+        x = self.tail(x)
+        torch.cuda.synchronize()
+        print(f'after tail: {time.time() - t0:.6f}s')
+        return x
     
     def forward_mlp(self, x, img_h, img_w): # x: embedded position coordinates, [n_ray, input_dim]
         '''The input data format is for MLP network. To keep the data preparation the same as before.
         '''
-        torch.cuda.synchronize()
-        t0 = time.time()
+        # torch.cuda.synchronize()
+        # t0 = time.time()
         x = x.view(-1, img_h, img_w, x.shape[1]) # [n_img, H, W, input_dim]
         x = x.permute(0, 3, 1, 2) # [n_img, input_dim, H, W]
-        torch.cuda.synchronize()
-        print(f'permute1: {time.time() - t0:.6f}s')
+        # torch.cuda.synchronize()
+        # print(f'permute1: {time.time() - t0:.6f}s')
         
         x = self.forward(x) # [n_img, 3, H, W]
-        torch.cuda.synchronize()
-        print(f'forward: {time.time() - t0:.6f}s')
+        # torch.cuda.synchronize()
+        # print(f'forward: {time.time() - t0:.6f}s')
         
         x = x.permute(0, 2, 3, 1) # [n_img, H, W, 3]
         x = x.reshape(-1, 3) # [n_ray, 3]
         
-        torch.cuda.synchronize()
-        print(f'permute2: {time.time() - t0:.6f}s')
+        # torch.cuda.synchronize()
+        # print(f'permute2: {time.time() - t0:.6f}s')
+        return x
+    
+    def forward_mlp2(self, x):
+        '''same speed as forward_mlp'''
+        x = x.view(-1, img_h, img_w, x.shape[1]) # [n_img, H, W, input_dim]
+        x = x.permute(0, 3, 1, 2) # [n_img, input_dim, H, W]
+        x = self.head(x) # [n_img, input_dim, H//3, W//3]
+        x = x.permute(0, 2, 3, 1) # [n_img, H//3, W//3, input_dim]
+        x = self.body_fc(x) 
+        x = x.permute(0, 3, 1, 2)
+        x = self.tail(x)
+        x = x.permute(0, 2, 3, 1) # [n_img, H, W, 3]
+        x = x.reshape(-1, 3) # [n_ray, 3]
         return x
 
 class NeRF_v4(nn.Module):

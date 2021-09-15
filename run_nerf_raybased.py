@@ -227,7 +227,8 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 rgb = model_enhance(rgb, h=H, w=W)
 
             # reshape to image
-            rgb = rgb.view(399, 399, 3)
+            H = W = int(math.sqrt(rgb.numel() / 3)) # TODO-@mst: may not be square
+            rgb = rgb.view(H, W, 3)
             disp = rgb # placeholder, to maintain compability
   
         rgbs.append(rgb)
