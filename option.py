@@ -120,7 +120,7 @@ parser.add_argument('--cache_ignore', type=str, default='')
 
 # @mst: related to nerf_v2
 parser.add_argument('--model_name', type=str, default='nerf_v2', 
-        choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.5', 'nerf_v4', 'nerf_v6'])
+        choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.5', 'nerf_v4', 'nerf_v6'])
 parser.add_argument('--N_iters', type=int, default=200000)
 parser.add_argument('--skips', type=str, default='4')
 parser.add_argument('--D_head', type=int, default=4)
@@ -168,7 +168,7 @@ parser.add_argument('--select_pixel_mode', type=str, default='rand_pixel', choic
 parser.add_argument('--enhance_cnn', type=str, default='', choices=['', 'EDSR', 'RCAN'])
 parser.add_argument('--freeze_pretrained', action='store_true')
 parser.add_argument('--focal_scale', type=float, default=1.)
-parser.add_argument('--data_mode', type=str, default='images', choices=['images', 'rays', 'images_new'],
+parser.add_argument('--data_mode', type=str, default='images', choices=['images', 'rays', 'images_new', '16x16patches'],
         help='which data is used in training, sample rays from images or directly load rays')
 parser.add_argument('--num_workers', type=int, default=8, 
         help='#cpus when loading data')

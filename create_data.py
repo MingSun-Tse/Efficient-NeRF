@@ -875,10 +875,15 @@ def train():
 
         # run
         patch_size = 16
-        data, t0, split = [], time.time(), 0
+        t0 = time.time()
         timer = Timer(args.n_pose_kd)
-        cnt_total = 0
-        for i in range(1, args.n_pose_kd + 1):
+        for img_ix in range(1, args.n_pose_kd + 1):
+            # all the patches of the same image are stored together
+            img_folder = f'{datadir_kd_new}/img_{img_ix}'
+            if not os.path.exists(img_folder):
+                os.makedirs(img_folder)
+
+            # core forward
             pose = get_rand_pose()
             focal_ = focal * (np.random.rand() + 1) # scale focal by [1, 2)
             rays_o, rays_d = get_rays1(H, W, focal_, pose) # rays_o, rays_d shape: [H, W, 3]
@@ -887,20 +892,24 @@ def train():
                                             verbose=False, retraw=False,
                                             **render_kwargs_)
             
-            data_ = torch.cat([rays_o, rays_d, rgb], dim=-1).data.cpu().numpy() # [H, W, 9]
+            # save rays_o
+            rays_o_save_path = f'{img_folder}/rays_o.npy'
+            np.save(rays_o_save_path, rays_o[0, 0, :].data.cpu().numpy())
+
+            # save rays_d and rgb
+            data_ = torch.cat([rays_d, rgb], dim=-1).data.cpu().numpy() # [H, W, 6]
             num_h, num_w = H // patch_size, W // patch_size
-            for h_ix in range(0, num_h, patch_size):
-                for w_ix in range(0, num_w, patch_size):
+            for h_ix in range(num_h):
+                for w_ix in range(num_w):
                     d = data_[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size, :]
-                    cnt_total += 1
-                    save_path = f'{datadir_kd_new}/{cnt_total}.npy'
+                    save_path = f'{img_folder}/patch_{h_ix * num_w + w_ix}.npy'
                     np.save(save_path, d)
-            print(f'[{i}/{args.n_pose_kd}] Using teacher to render more images... elapsed time: {(time.time() - t0):.2f}s')
+            print(f'[{img_ix}/{args.n_pose_kd}] Using teacher to render more images... elapsed time: {(time.time() - t0):.2f}s')
             print(f'Predicted finish time: {timer()}')
 
             # check pseudo images
-            if i <= 5:
-                filename = f'{datadir_kd_new}/pseudo_sample_{i}.png'
+            if img_ix <= 5:
+                filename = f'{datadir_kd_new}/pseudo_sample_{img_ix}.png'
                 imageio.imwrite(filename, to8b(rgb))
 
 if __name__=='__main__':

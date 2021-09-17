@@ -86,6 +86,12 @@ class PointSampler():
         pts = rays_o[..., None, :] + rays_d[..., None, :] * self.z_vals_test[..., :, None] # [H*W, n_sample, 3]
         return pts.view(pts.shape[0], -1) # [H*W, n_sample*3]
     
+    def sample_test2(self, c2w): # c2w: [3, 4]
+        rays_d = torch.sum(self.dirs.unsqueeze(dim=-2) * c2w[:3,:3], dim=-1).view(-1, 3) # [H*W, 3] # TODO-@mst: improve this non-intuitive impl.
+        rays_o = c2w[:3, -1].expand(rays_d.shape) # [H*W, 3]
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * self.z_vals_test[..., :, None] # [H*W, n_sample, 3]
+        return pts # [..., n_sample, 3]
+
     def sample_train(self, rays_o, rays_d, perturb):
         z_vals = self.z_vals[None, :].expand(rays_o.shape[0], self.z_vals.shape[0]) # [n_ray, n_sample]
         if perturb > 0.:
@@ -99,6 +105,20 @@ class PointSampler():
         pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [H*W, n_sample, 3]
         return pts.view(pts.shape[0], -1)
 
+    def sample_train2(self, rays_o, rays_d, perturb): # rays_o: [n_img, patch_h, patch_w, 3]
+        z_vals = self.z_vals[None, None, None, :].expand(*rays_o.shape[:3], self.z_vals.shape[0]) # [n_img, patch_h, patch_w, n_sample]
+        if perturb > 0.:
+            # get intervals between samples
+            mids = .5 * (z_vals[..., 1:] + z_vals[..., :-1]) # [n_img, patch_h, patch_w, n_sample]
+            upper = torch.cat([mids, z_vals[..., -1:]], dim=-1)
+            lower = torch.cat([z_vals[..., :1],  mids], dim=-1)
+            # stratified samples in those intervals
+            t_rand = torch.rand(z_vals.shape[0]).to(device) # [n_img]
+            t_rand = t_rand[:, None, None, None].expand_as(z_vals)  # [n_img, patch_h, patch_w, n_sample]
+            z_vals = lower + (upper - lower) * t_rand  # [n_img, patch_h, patch_w, n_sample]
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_img, patch_h, patch_w, n_sample, 3]
+        return pts
+
 class PositionalEmbedder():
     def __init__(self, L, include_input=True):
         self.weights = 2 ** torch.linspace(0, L-1, steps=L).to(device) # [L]
@@ -110,6 +130,12 @@ class PositionalEmbedder():
         if self.include_input:
             y = torch.cat([y, x.unsqueeze(dim=-1)], dim=-1) # [n_ray, dim_pts, 2L+1]
         return y.view(y.shape[0], -1) # [n_ray, dim_pts*(2L+1)], example: 48*21=1008
+    def embed(self, x): # v2 of __call__
+        y = x[..., :, None] * self.weights 
+        y = torch.cat([torch.sin(y), torch.cos(y)], dim=-1) 
+        if self.include_input:
+            y = torch.cat([y, x.unsqueeze(dim=-1)], dim=-1)
+        return y # [n_img, patch_h, patch_w, n_sample, 3, 2L+1]
 
 def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False, global_step=-1, print=print):
     """Transforms model's predictions to semantically meaningful values.
@@ -574,10 +600,11 @@ class NeRF_v3_3(nn.Module):
         return x
 
 class NeRF_v3_4(nn.Module):
-    '''Based on NeRF_v3.2, 3x3 rays share one network -- Deprecated'''
-    def __init__(self, args, input_dim, share_pixels):
+    '''Based on NeRF_v3.2, 3x3 rays share one network'''
+    def __init__(self, args, input_dim, scale=3):
         super(NeRF_v3_4, self).__init__()
         self.args = args
+        self.scale = scale
         D, W = args.netdepth, args.netwidth
 
         # get network width
@@ -588,8 +615,8 @@ class NeRF_v3_4(nn.Module):
             Ws = [W] * (D-1) + [3]
 
         # head
-        self.input_dim = input_dim * share_pixels
-        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU(inplace=True)])
+        self.input_dim = input_dim * scale ** 2
+        self.head = nn.Sequential(*[nn.Linear(self.input_dim, Ws[0]), nn.ReLU(inplace=True)])
         
         # body
         body = []
@@ -598,8 +625,8 @@ class NeRF_v3_4(nn.Module):
         self.body = nn.Sequential(*body)
         
         # tail
-        self.tail = nn.Linear(Ws[D-2], 3 * share_pixels) if args.linear_tail \
-            else nn.Sequential(*[nn.Linear(Ws[D-2], 3 * share_pixels), nn.Sigmoid()])
+        self.tail = nn.Linear(Ws[D-2], 3 * scale ** 2) if args.linear_tail \
+            else nn.Sequential(*[nn.Linear(Ws[D-2], 3 * scale ** 2), nn.Sigmoid()])
     
     def forward(self, x): # x: embedded position coordinates
         x = self.head(x)
@@ -645,26 +672,25 @@ class NeRF_v3_5(nn.Module):
         self.input_dim = input_dim
         self.head = nn.Sequential(*[nn.Conv2d(input_dim, Ws[0], kernel_size=scale, stride=scale), nn.ReLU(inplace=True)])
         
-        # body (keep the feature map size)
+        # body (keep the feature map size), use FC layers, a little bit faster than 1x1 conv
         body = []
         for i in range(1, D-1):
-            body += [nn.Conv2d(Ws[i-1], Ws[i], kernel_size=1), nn.ReLU(inplace=True)]
+            body += [nn.Linear(Ws[i-1], Ws[i]), nn.ReLU(inplace=True)]
         self.body = nn.Sequential(*body)
 
         # tail: upsample by scale
-        conv = lambda in_channels, out_channels, kernel_size, bias: nn.Conv2d(in_channels, out_channels, kernel_size,
-            padding=(kernel_size//2), bias=bias)
-        act = False if args.linear_tail else nn.Sigmoid
-        self.tail = nn.Sequential(*[
-            Upsampler(conv, scale, Ws[i], kernel_size=1, act=act),
-            conv(Ws[i], 3, kernel_size=1, bias=True)
-        ])
-
-        # ###################### same network implemented by FC layers
-        body_fc = []
-        for i in range(1, D-1):
-            body_fc += [nn.Linear(Ws[i-1], Ws[i]), nn.ReLU(inplace=True)]
-        self.body_fc = nn.Sequential(*body_fc)
+        # --- use PixelShuffle, slow, deprecated!
+        # conv = lambda in_channels, out_channels, kernel_size, bias: nn.Conv2d(in_channels, out_channels, kernel_size,
+        #     padding=(kernel_size//2), bias=bias)
+        # act = False if args.linear_tail else nn.Sigmoid
+        # self.tail = nn.Sequential(*[
+        #     Upsampler(conv, scale, Ws[i], kernel_size=1, act=act),
+        #     conv(Ws[i], 3, kernel_size=1, bias=True)
+        # ])
+        # ---
+        tail = [nn.Linear(Ws[i], 3 * scale**2)]
+        if not args.linear_tail: tail.append(nn.Sigmoid())
+        self.tail = nn.Sequential(*tail)
 
     # def forward(self, x): # x: embedded position coordinates
     #     '''if body is nn.Linear'''
@@ -711,19 +737,6 @@ class NeRF_v3_5(nn.Module):
         
         # torch.cuda.synchronize()
         # print(f'permute2: {time.time() - t0:.6f}s')
-        return x
-    
-    def forward_mlp2(self, x):
-        '''same speed as forward_mlp'''
-        x = x.view(-1, img_h, img_w, x.shape[1]) # [n_img, H, W, input_dim]
-        x = x.permute(0, 3, 1, 2) # [n_img, input_dim, H, W]
-        x = self.head(x) # [n_img, input_dim, H//3, W//3]
-        x = x.permute(0, 2, 3, 1) # [n_img, H//3, W//3, input_dim]
-        x = self.body_fc(x) 
-        x = x.permute(0, 3, 1, 2)
-        x = self.tail(x)
-        x = x.permute(0, 2, 3, 1) # [n_img, H, W, 3]
-        x = x.reshape(-1, 3) # [n_ray, 3]
         return x
 
 class NeRF_v4(nn.Module):
