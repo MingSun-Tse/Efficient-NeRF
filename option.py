@@ -203,6 +203,7 @@ parser.add_argument('--scale', type=int, default=3,
         help='predict multiple pixels')
 parser.add_argument('--dim_dir', type=int, default=3)
 parser.add_argument('--dim_rgb', type=int, default=3)
+parser.add_argument('--rand_mode', type=str, default='batch', choices=['batch', 'fully'])
 args = parser.parse_args()
 
 if args.video_tag == '':

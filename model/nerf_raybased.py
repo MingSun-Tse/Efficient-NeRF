@@ -101,7 +101,7 @@ class PointSampler():
             lower = torch.cat([z_vals[..., :1],  mids], dim=-1)
             # stratified samples in those intervals
             if rand_mode == 'batch':
-                t_rand = torch.rand(z_vals.shape[0], 1).expand_as(z_vals).to(device) # [n_ray, 1] -> [n_ray, n_sample]
+                pass # t_rand = torch.rand(z_vals.shape[0], 1).expand_as(z_vals).to(device) # [n_ray, 1] -> [n_ray, n_sample]
             elif rand_mode == 'fully': # fully random
                 t_rand = torch.rand(z_vals.shape).to(device) # [n_ray, n_sample]
             z_vals = lower + (upper - lower) * t_rand
