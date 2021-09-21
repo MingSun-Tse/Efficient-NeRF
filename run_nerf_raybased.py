@@ -260,8 +260,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                     model_input = torch.stack(model_input, dim=0) # [n_ray, 9*n_sample*3*embed_dim]
                     rgb_patches = model(model_input) # [n_ray, 27]
 
-                    rgb = torch.zeros(num_h * patch_size, num_w * patch_size, 3).cuda()
-                    cnt = -1
+                    rgb, cnt = torch.zeros(num_h * patch_size, num_w * patch_size, 3).cuda(), -1
                     for h_ix in range(num_h):
                         for w_ix in range(num_w):
                             cnt += 1
