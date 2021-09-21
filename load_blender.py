@@ -259,12 +259,12 @@ class BlenderDataset_v3(Dataset):
         self.n_patch_per_img = len(os.listdir(self.all_imgs[0])) - 1
         print(f'Load data done. #All files: {len(self.all_imgs)}')
 
-    def __getitem__(self, index, rand_ix=1):
+    def __getitem__(self, index):
         img_folder = self.all_imgs[index]
         rays_o_path = f'{img_folder}/rays_o.npy'
         rays_o = torch.Tensor(np.load(rays_o_path)) # [3]
         
-        # rand_ix = np.random.randint(self.n_patch_per_img) # pick one patch randomly in each image folder
+        rand_ix = np.random.randint(self.n_patch_per_img) # pick one patch randomly in each image folder
         patch_path = f'{img_folder}/patch_{rand_ix}.npy'
         data = torch.Tensor(np.load(patch_path)) # [16, 16, 6]
         rays_d, rgb = data[..., :3], data[..., 3:6] # both: [16, 16, 3]
