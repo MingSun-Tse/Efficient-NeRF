@@ -92,18 +92,21 @@ class PointSampler():
         pts = rays_o[..., None, :] + rays_d[..., None, :] * self.z_vals_test[..., :, None] # [H*W, n_sample, 3]
         return pts # [..., n_sample, 3]
 
-    def sample_train(self, rays_o, rays_d, perturb):
-        z_vals = self.z_vals[None, :].expand(rays_o.shape[0], self.z_vals.shape[0]) # [n_ray, n_sample]
+    def sample_train(self, rays_o, rays_d, perturb, rand_mode='fully'):
+        z_vals = self.z_vals[None, :].expand(rays_o.shape[0], self.z_vals.shape[0]) # depth [n_ray, n_sample]
         if perturb > 0.:
             # get intervals between samples
             mids = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
             upper = torch.cat([mids, z_vals[..., -1:]], dim=-1)
             lower = torch.cat([z_vals[..., :1],  mids], dim=-1)
             # stratified samples in those intervals
-            t_rand = torch.rand(z_vals.shape).to(device) # uniform dist [0, 1)
+            if rand_mode == 'batch':
+                t_rand = torch.rand(z_vals.shape[0], 1).expand_as(z_vals).to(device) # [n_ray, 1] -> [n_ray, n_sample]
+            elif rand_mode == 'fully': # fully random
+                t_rand = torch.rand(z_vals.shape).to(device) # [n_ray, n_sample]
             z_vals = lower + (upper - lower) * t_rand
-        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [H*W, n_sample, 3]
-        return pts.view(pts.shape[0], -1)
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, DIM_DIR]
+        return pts.view(pts.shape[0], -1) # [n_ray, n_sample * DIM_DIR]
 
     def sample_train2(self, rays_o, rays_d, perturb): # rays_o: [n_img, patch_h, patch_w, 3]
         z_vals = self.z_vals[None, None, None, :].expand(*rays_o.shape[:3], self.z_vals.shape[0]) # [n_img, patch_h, patch_w, n_sample]
@@ -125,7 +128,7 @@ class PositionalEmbedder():
         self.include_input = include_input
         self.embed_dim = 2 * L + 1 if include_input else 2 * L
     def __call__(self, x): 
-        y = x[..., :, None] * self.weights # [n_ray, dim_pts, 1] * [L] -> [n_ray, dim_pts, L]
+        y = x[..., None] * self.weights # [n_ray, dim_pts, 1] * [L] -> [n_ray, dim_pts, L]
         y = torch.cat([torch.sin(y), torch.cos(y)], dim=-1) # [n_ray, dim_pts, 2L]
         if self.include_input:
             y = torch.cat([y, x.unsqueeze(dim=-1)], dim=-1) # [n_ray, dim_pts, 2L+1]

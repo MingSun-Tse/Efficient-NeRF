@@ -39,7 +39,8 @@ from functools import partial
 get_rays1 = get_rays
 get_rays = partial(get_rays, trans_origin=args.trans_origin, focal_scale=args.focal_scale)
 
-DIM_DIR = DIM_RGB = 3
+DIM_DIR = args.dim_dir
+DIM_RGB = args.dim_rgb
 if args.model_name in ['nerf_v4']:
     DIM_DIR = DIM_RGB = 6
 
@@ -184,7 +185,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         if args.model_name in ['nerf']:
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs) 
 
-        elif args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.5', 'nerf_v4', 'nerf_v6']:
+        elif args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.4.2', 'nerf_v3.5', 'nerf_v4', 'nerf_v6']:
             model = render_kwargs['network_fn']
             perturb = render_kwargs['perturb']
 
@@ -237,6 +238,18 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                     rgb = model(model_input) # [n_patch, 27]
                     torch.cuda.synchronize()
                     print(f'model forward {time.time() - t1:.4f}s')
+
+            elif args.model_name in ['nerf_v3.4.2']:
+                with torch.no_grad():
+                    pts = point_sampler.sample_test(c2w) # [H*W, n_sample*3]
+                    pts = positional_embedder(pts) # [H*W, n_sample*3*embed_dim]
+                    rgb = []
+                    for ix in range(0, pts.shape[0], chunk):
+                        x = pts[ix:ix+chunk]
+                        x = x.repeat(1, args.scale ** 2) # [H*W, n_sample*3*embed_dim*27]
+                        rgb_ = model(x)[:, :3]
+                        rgb += [rgb_]
+                    rgb = torch.cat(rgb, dim=0)
 
             elif args.model_name in ['nerf_v4']:
                 rays_o = torch.reshape(rays_o, (-1, args.num_shared_pixels * 3))
@@ -370,7 +383,7 @@ def create_nerf(args, near, far):
         model = NeRF_v3_3(args, input_dim).to(device)
         grad_vars += list(model.parameters())
 
-    elif args.model_name in ['nerf_v3.4']:
+    elif args.model_name in ['nerf_v3.4', 'nerf_v3.4.2']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
         model = NeRF_v3_4(args, input_dim, scale=args.scale).to(device)
         grad_vars += list(model.parameters())
@@ -512,7 +525,7 @@ def create_nerf(args, near, far):
         dummy_input = torch.randn(1, model.input_dim).to(device)
         n_flops = get_n_flops_(model, input=dummy_input, count_adds=False)
 
-    elif args.model_name in ['nerf_v3.4']:
+    elif args.model_name in ['nerf_v3.4', 'nerf_v3.4.2']:
         dummy_input = torch.randn(1, model.input_dim * (args.scale ** 2)).to(device)
         n_flops = get_n_flops_(model, input=dummy_input, count_adds=False) / (args.scale ** 2)
 
@@ -1307,6 +1320,13 @@ def train():
                 pts = positional_embedder.embed(pts) # [n_img, patch_h, patch_w, n_sample, 3, 2L+1]
                 rgb = model(pts.view(pts.shape[0], -1))
                 rgb = rgb.view(*pts.shape[:3], 3) # [n_img, patch_h, patch_w, 3]
+
+            elif args.model_name in ['nerf_v3.4.2']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                rays_o = rays_o.repeat(1, args.scale**2) # [n_ray, 3] -> [n_ray, 27], to match the shape of rays_d, rays_rgb
+                pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb, rand_mode='batch') # [n_ray, n_sample * DIM_DIR]
+                rgb = model(positional_embedder(pts)) # [n_ray, 3 * scale ** 2]
 
             elif args.model_name in ['nerf_v3.5']:
                 model = render_kwargs_train['network_fn']

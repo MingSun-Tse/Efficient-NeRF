@@ -120,7 +120,7 @@ parser.add_argument('--cache_ignore', type=str, default='')
 
 # @mst: related to nerf_v2
 parser.add_argument('--model_name', type=str, default='nerf_v2', 
-        choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.5', 'nerf_v4', 'nerf_v6'])
+        choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.4.2', 'nerf_v3.5', 'nerf_v4', 'nerf_v6'])
 parser.add_argument('--N_iters', type=int, default=200000)
 parser.add_argument('--skips', type=str, default='4')
 parser.add_argument('--D_head', type=int, default=4)
@@ -200,7 +200,9 @@ parser.add_argument('--benchmark', action='store_true',
 parser.add_argument('--rand_crop_size', type=int, default=-1)
 parser.add_argument('--share_pixels', type=int, default=9)
 parser.add_argument('--scale', type=int, default=3,
-        help='scale in nerf_v3.5')
+        help='predict multiple pixels')
+parser.add_argument('--dim_dir', type=int, default=3)
+parser.add_argument('--dim_rgb', type=int, default=3)
 args = parser.parse_args()
 
 if args.video_tag == '':
