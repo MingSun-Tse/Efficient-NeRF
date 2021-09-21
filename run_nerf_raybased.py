@@ -1325,7 +1325,7 @@ def train():
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
                 rays_o = rays_o.repeat(1, args.scale**2) # [n_ray, 3] -> [n_ray, 27], to match the shape of rays_d, rays_rgb
-                pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb, rand_mode=args.rand_mode) # [n_ray, n_sample * DIM_DIR]
+                pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb) # [n_ray, n_sample * DIM_DIR]
                 rgb = model(positional_embedder(pts)) # [n_ray, 3 * scale ** 2]
 
             elif args.model_name in ['nerf_v3.5']:
