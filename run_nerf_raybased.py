@@ -190,7 +190,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             perturb = render_kwargs['perturb']
 
             # get rays_o and rays_d
-            if args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v4']:
+            if args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v4', 'nerf_v3.4.2']:
                 rays_o, rays_d = get_rays1(H, W, focal, c2w[:3, :4]) # [H, W, 3]
                 rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3) # [H*W, 3]
 
@@ -241,15 +241,32 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
 
             elif args.model_name in ['nerf_v3.4.2']:
                 with torch.no_grad():
-                    pts = point_sampler.sample_test(c2w) # [H*W, n_sample*3]
-                    pts = positional_embedder(pts) # [H*W, n_sample*3*embed_dim]
-                    rgb = []
-                    for ix in range(0, pts.shape[0], chunk):
-                        x = pts[ix:ix+chunk]
-                        x = x.repeat(1, args.scale ** 2) # [H*W, n_sample*3*embed_dim*27]
-                        rgb_ = model(x)[:, :3]
-                        rgb += [rgb_]
-                    rgb = torch.cat(rgb, dim=0)
+                    patch_size = args.scale
+                    rays_o, rays_d = rays_o.view(H, W, 3), rays_d.view(H, W, 3)
+                    num_h, num_w = H // patch_size, W // patch_size
+                    
+                    model_input = []
+                    for h_ix in range(num_h):
+                        for w_ix in range(num_w):
+                            rays_o_patch = rays_o[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size] # [3, 3, 3]
+                            rays_d_patch = rays_d[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size] # [3, 3, 3]
+                            rays_o_patch = rays_o_patch.reshape([1, -1]) # [1, 27]
+                            rays_d_patch = rays_d_patch.reshape([1, -1]) # [1, 27]
+                            pts = point_sampler.sample_train(rays_o_patch, rays_d_patch, perturb=0.) # [1, 9*n_sample*3]
+                            pts = positional_embedder(pts) # [1, 9*n_sample*3*embed_dim]
+                            model_input += [pts]
+                    
+                    # forward in batch    
+                    model_input = torch.stack(model_input, dim=0) # [n_ray, 9*n_sample*3*embed_dim]
+                    rgb_patches = model(model_input) # [n_ray, 27]
+
+                    rgb = torch.zeros(num_h * patch_size, num_w * patch_size, 3).cuda()
+                    cnt = -1
+                    for h_ix in range(num_h):
+                        for w_ix in range(num_w):
+                            cnt += 1
+                            rgb_ = rgb_patches[cnt].view(patch_size, patch_size, 3) # [3, 3, 3]
+                            rgb[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size, :] = rgb_
 
             elif args.model_name in ['nerf_v4']:
                 rays_o = torch.reshape(rays_o, (-1, args.num_shared_pixels * 3))
@@ -278,7 +295,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         disps.append(disp)
 
         if gt_imgs is not None:
-            errors += [(rgb-gt_imgs[i]).abs()]
+            errors += [(rgb - gt_imgs[i][:H_, :W_, :]).abs()]
         
         if savedir is not None:
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
@@ -299,7 +316,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     # imageio.imwrite(filename, to8b(rgbs[5]))
     
     if gt_imgs is not None:
-        test_loss = img2mse(rgbs, gt_imgs)
+        test_loss = img2mse(rgbs, gt_imgs[:, :H_, :W_])
         test_psnr = mse2psnr(test_loss)
         errors = torch.stack(errors, dim=0)
     else:
