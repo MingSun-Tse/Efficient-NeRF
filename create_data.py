@@ -811,15 +811,15 @@ def train():
             rays_o, rays_d, rgb = rays_o.data.cpu().numpy(), rays_d.cpu().data.numpy(), rgb.cpu().data.numpy()
 
             # for each pixel, get its neighbor pixel, add it to the data
-            offset = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 0], [0, 1], [1, -1], [1, 0], [1, 1]] # 3x3
+            offset = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 0], [0, 1], [1, -1], [1, 0], [1, 1]] # 3x3, 9 locations
             rays_d3x3 = np.zeros((H, W, len(offset)*3))
             rgb3x3 = np.zeros((H, W, len(offset)*3))
             for h in range(1, H-1): # [1, H-2]
                 for w in range(1, W-1): # [1, W-2]
                     dirs, rgbs = [], []
                     for offset_h, offset_w in offset:
-                        dirs += list(rays_d[h+offset_h, w+offset_w])
-                        rgbs += list(rgb[h+offset_h, w+offset_w])
+                        dirs += list(rays_d[h+offset_h, w+offset_w]) # three numbers
+                        rgbs += list(rgb[h+offset_h, w+offset_w]) # three numbers
                     rays_d3x3[h, w] = dirs[:]
                     rgb3x3[h, w] = rgbs[:]
             rays_d3x3 = np.array(rays_d3x3[1:H-1, 1:W-1]) # [H-2, W-2, 27]
@@ -850,7 +850,7 @@ def train():
                 num = data.shape[0] // split_size * split_size
                 for ix in range(0, num, split_size):
                     split += 1
-                    save_path = f'{datadir_kd_new}/data_{split}.npy'
+                    save_path = f'{datadir_kd_new}/data_{split % 40000}.npy' # to maintain similar total size
                     d = data[ix: ix+split_size]
                     np.save(save_path, d)
                 print(f'[{i}/{args.n_pose_kd}] Saved data at "{datadir_kd_new}"')
