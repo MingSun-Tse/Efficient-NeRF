@@ -158,6 +158,7 @@ parser.add_argument('--kd_poses_update', type=str, default='once')
 parser.add_argument('--datadir_kd', type=str, default='')
 parser.add_argument('--create_data_chunk', type=int, default=100)
 parser.add_argument('--create_data', type=str, default='spiral_evenly_spaced')
+parser.add_argument('--no_rand_focal', dest='use_rand_focal', action='store_false', default=True, help='use random focal when creating data')
 parser.add_argument('--i_update_data', type=int, default=1000000000,
         help='interval of updating training data (changing pseudo data)')
 parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0.9')
