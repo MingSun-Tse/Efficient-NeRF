@@ -738,6 +738,43 @@ class NeRF_v3_5(nn.Module):
         # print(f'permute2: {time.time() - t0:.6f}s')
         return x
 
+class NeRF_v3_6(nn.Module):
+    '''Based on nerf_v3.4.2, Diverge in early stages'''
+    def __init__(self, args, input_dim, scale=3):
+        super(NeRF_v3_6, self).__init__()
+        self.args = args
+        self.scale = scale
+        D, W = args.netdepth, args.netwidth
+
+        # get network width
+        if args.layerwise_netwidths:
+            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
+            print('Layer-wise widths are given. Overwrite args.netwidth')
+        else:
+            Ws = [W] * (D-1) + [3]
+
+        # head
+        self.input_dim = input_dim * scale ** 2
+        self.head = nn.Sequential(*[nn.Linear(self.input_dim, Ws[0]), nn.ReLU(inplace=True)])
+        
+        # body
+        body = []
+        for i in range(1, D-1):
+            groups = 1 if i < args.diverge_depth else (scale ** 2)
+            body += [nn.Conv2d(Ws[i-1], Ws[i], kernel_size=1, groups=groups), nn.ReLU(inplace=True)]
+        self.body = nn.Sequential(*body)
+        
+        # tail
+        self.tail = nn.Conv2d(Ws[D-2], 3 * scale ** 2, kernel_size=1, groups=scale**2) if args.linear_tail \
+            else nn.Sequential(*[nn.Conv2d(Ws[D-2], 3 * scale ** 2, kernel_size=1, groups=scale**2), nn.Sigmoid()])
+    
+    def forward(self, x): # x: embedded position coordinates
+        x = self.head(x) # [batch_size, 1024]
+        x = x[..., None, None] # [batch_size, 1024, 1, 1]
+        x = self.body(x) + x if self.args.use_residual else self.body(x)
+        x = self.tail(x)
+        return x.view(x.shape[0], -1) # keep the same output shape as nerf_v3.4.2
+
 class NeRF_v4(nn.Module):
     '''Spatial sharing. Two rays'''
     def __init__(self, args, near, far):
