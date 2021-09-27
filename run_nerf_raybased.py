@@ -1361,7 +1361,12 @@ def train():
                 perturb = render_kwargs_train['perturb']
                 rays_o = rays_o.repeat(1, args.scale**2) # [n_ray, 3] -> [n_ray, 27], to match the shape of rays_d, rays_rgb
                 pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb) # [n_ray, n_sample * DIM_DIR]
-                rgb = model(positional_embedder(pts)) # [n_ray, 3 * scale ** 2]
+                pts = positional_embedder(pts)
+                if args.shuffle_input:
+                    shuffle_input_randix = torch.randperm(pts.shape[0])
+                    pts = pts[shuffle_input_randix]
+                    target_s = target_s[shuffle_input_randix]
+                rgb = model(pts) # [n_ray, 3 * scale ** 2]
 
             elif args.model_name in ['nerf_v3.5']:
                 model = render_kwargs_train['network_fn']

@@ -206,6 +206,7 @@ parser.add_argument('--scale', type=int, default=3,
 parser.add_argument('--dim_dir', type=int, default=3)
 parser.add_argument('--dim_rgb', type=int, default=3)
 parser.add_argument('--diverge_depth', type=int, default=6)
+parser.add_argument('--shuffle_input', action='store_true')
 args = parser.parse_args()
 
 if args.video_tag == '':
