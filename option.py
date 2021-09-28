@@ -120,7 +120,7 @@ parser.add_argument('--cache_ignore', type=str, default='')
 
 # @mst: related to nerf_v2
 parser.add_argument('--model_name', type=str, default='nerf_v2', 
-        choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.4.2', 'nerf_v3.6' ,
+        choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.4.2', 'nerf_v3.6', 'nerf_v3.7',
         'nerf_v3.5', 'nerf_v4', 'nerf_v6'])
 parser.add_argument('--N_iters', type=int, default=200000)
 parser.add_argument('--skips', type=str, default='4')
@@ -188,6 +188,7 @@ parser.add_argument('--previous_layers', type=str, default='')
 parser.add_argument('--use_residual', action='store_true')
 parser.add_argument('--linear_tail', action='store_true')
 parser.add_argument('--layerwise_netwidths', type=str, default='')
+parser.add_argument('--layerwise_netwidths2', type=str, default='')
 parser.add_argument('--render_iters', type=int, default=1,
         help='the number of forwards when rendering one image') 
 parser.add_argument('--forward_scale', type=float, default=1.,
