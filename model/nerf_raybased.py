@@ -570,14 +570,30 @@ class NeRF_v3_3(nn.Module):
         else:
             Ws = [W] * (D - 1) + [3]
         
+        bn = True if hasattr(args, 'use_bn') and args.use_bn else False
+        
         # head
         self.input_dim = input_dim
-        self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=1), nn.ReLU(inplace=True)])
+        if bn:
+            self.head = nn.Sequential(*[
+                nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=1), 
+                nn.BatchNorm2d(Ws[0]),
+                nn.ReLU(inplace=True)])
+        else:
+            self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=1), nn.ReLU(inplace=True)])
         
+
         # body
         body = []
         for i in range(1, D - 1):
-            body += [nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=1), nn.ReLU(inplace=True)]
+            if bn:
+                body += [nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=1), nn.ReLU(inplace=True)]
+            else:
+                body += [
+                    nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=1), 
+                    nn.BatchNorm2d(Ws[i]),
+                    nn.ReLU(inplace=True)]
+
         self.body = nn.Sequential(*body)
         
         # tail
