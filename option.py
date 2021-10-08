@@ -120,7 +120,8 @@ parser.add_argument('--cache_ignore', type=str, default='')
 
 # @mst: related to nerf_v2
 parser.add_argument('--model_name', type=str, default='nerf_v2', 
-        choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.4.2', 'nerf_v3.5', 'nerf_v4', 'nerf_v6'])
+        choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.4.2', 'nerf_v3.6', 'nerf_v3.7',
+        'nerf_v3.5', 'nerf_v4', 'nerf_v6'])
 parser.add_argument('--N_iters', type=int, default=200000)
 parser.add_argument('--skips', type=str, default='4')
 parser.add_argument('--D_head', type=int, default=4)
@@ -158,6 +159,8 @@ parser.add_argument('--kd_poses_update', type=str, default='once')
 parser.add_argument('--datadir_kd', type=str, default='')
 parser.add_argument('--create_data_chunk', type=int, default=100)
 parser.add_argument('--create_data', type=str, default='spiral_evenly_spaced')
+parser.add_argument('--no_rand_focal', dest='use_rand_focal', action='store_false', default=True, help='use random focal when creating data')
+parser.add_argument('--max_save', type=int, default=40000)
 parser.add_argument('--i_update_data', type=int, default=1000000000,
         help='interval of updating training data (changing pseudo data)')
 parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0.9')
@@ -186,6 +189,7 @@ parser.add_argument('--previous_layers', type=str, default='')
 parser.add_argument('--use_residual', action='store_true')
 parser.add_argument('--linear_tail', action='store_true')
 parser.add_argument('--layerwise_netwidths', type=str, default='')
+parser.add_argument('--layerwise_netwidths2', type=str, default='')
 parser.add_argument('--render_iters', type=int, default=1,
         help='the number of forwards when rendering one image') 
 parser.add_argument('--forward_scale', type=float, default=1.,
@@ -204,6 +208,8 @@ parser.add_argument('--scale', type=int, default=3,
 parser.add_argument('--dim_dir', type=int, default=3)
 parser.add_argument('--dim_rgb', type=int, default=3)
 parser.add_argument('--use_bn', action='store_true')
+parser.add_argument('--diverge_depth', type=int, default=6)
+parser.add_argument('--shuffle_input', action='store_true')
 args = parser.parse_args()
 
 if args.video_tag == '':

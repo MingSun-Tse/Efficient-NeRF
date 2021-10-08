@@ -144,3 +144,11 @@ CUDA_VISIBLE_DEVICES=0 python3.8 run_nerf_raybased.py --model_name nerf_v3.5 --c
 
 ## nerf_v3.4.2 on SERVER138
 CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf_v3.4.2 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 1024 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v11_3x3rays_queue --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 1024 --data_mode rays --use_residual --scale 3 --project nerfv3.4.2__lego__S16W1024D11_KDDataV11_Res --cache_ignore data,Experiments2,Experiments --screen --N_rand 12 --num_workers 16 --dim_dir 27 --dim_rgb 27 --i_update_data 10000
+
+## nerf_v3.6 on SERVER138
+CUDA_VISIBLE_DEVICES=0 python create_data.py --create_data 3x3rays --config configs/lego.txt --teacher_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --n_pose_kd 10000000000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v11_3x3rays_queue_NoRandFocal --screen --project nerf__lego__CreateData_v11_3x3rays_queue_NoRandFocal --cache_ignore data,Experiments,Experiments2,torchsearchsorted --no_rand_focal
+
+CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --model_name nerf_v3.6 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 1017 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v11_3x3rays_queue --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 1024 --data_mode rays --use_residual --scale 3 --cache_ignore data,Experiments2,Experiments --screen --N_rand 6 --num_workers 16 --dim_dir 27 --dim_rgb 27 --i_update_data 10000 --project nerfv3.6__lego__S16W1017D11_KDDataV11_BS24576_Res
+
+## nerf_v3.7 on SERVER138
+CUDA_VISIBLE_DEVICES=1,2,3 python run_nerf_raybased.py --model_name nerf_v3.7 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 512 --layerwise_netwidths2 256,256,256,256,256,256,256,256,256,256,3 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v11_3x3rays_queue_NoRandFocal --n_pose_video 20,1,1 --N_iters 1200000 --data_mode rays --use_residual --scale 3 --cache_ignore data,Experiments2,Experiments --screen --N_rand 6 --num_workers 16 --dim_dir 27 --dim_rgb 27 --i_update_data 10000 --project nerfv3.7__lego__S16W512,256D11_KDDataV11_BS24576_Res

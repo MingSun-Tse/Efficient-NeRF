@@ -4,7 +4,7 @@ torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn 
 import torch.nn.functional as F
 import numpy as np, time, math
-import dill
+import pdb
 
 # TODO: remove this dependency
 # from torchsearchsorted import searchsorted # not used by raybased nerf, commented because it is not compiled successfully using docker
@@ -752,6 +752,97 @@ class NeRF_v3_5(nn.Module):
         # torch.cuda.synchronize()
         # print(f'permute2: {time.time() - t0:.6f}s')
         return x
+
+class NeRF_v3_6(nn.Module):
+    '''Based on nerf_v3.4.2, Diverge in early stages'''
+    def __init__(self, args, input_dim, scale=3):
+        super(NeRF_v3_6, self).__init__()
+        self.args = args
+        self.scale = scale
+        D, W = args.netdepth, args.netwidth
+
+        # get network width
+        if args.layerwise_netwidths:
+            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
+            print('Layer-wise widths are given. Overwrite args.netwidth')
+        else:
+            Ws = [W] * (D-1) + [3]
+
+        # head
+        self.input_dim = input_dim * scale ** 2
+        self.head = nn.Sequential(*[nn.Linear(self.input_dim, Ws[0]), nn.ReLU(inplace=True)])
+        
+        # body
+        body = []
+        for i in range(1, D-1):
+            groups = 1 if i < args.diverge_depth else (scale ** 2)
+            body += [nn.Conv2d(Ws[i-1], Ws[i], kernel_size=1, groups=groups), nn.ReLU(inplace=True)]
+        self.body = nn.Sequential(*body)
+        
+        # tail
+        self.tail = nn.Conv2d(Ws[D-2], 3 * scale ** 2, kernel_size=1, groups=scale**2) if args.linear_tail \
+            else nn.Sequential(*[nn.Conv2d(Ws[D-2], 3 * scale ** 2, kernel_size=1, groups=scale**2), nn.Sigmoid()])
+        
+    def forward(self, x): # x: embedded position coordinates
+        x = self.head(x) # [batch_size, 1024]
+        x = x[..., None, None] # [batch_size, 1024, 1, 1]
+        x = self.body(x) + x if self.args.use_residual else self.body(x)
+        x = self.tail(x)
+        return x.view(x.shape[0], -1) # keep the same output shape as nerf_v3.4.2
+
+class NeRF_v3_7(nn.Module):
+    '''Based on NeRF_v3.4.2, two paths'''
+    def __init__(self, args, input_dim, scale=3):
+        super(NeRF_v3_7, self).__init__()
+        self.args = args
+        self.scale = scale
+        D, W = args.netdepth, args.netwidth
+
+        # get network width
+        if args.layerwise_netwidths:
+            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
+            print('Layer-wise widths are given. Overwrite args.netwidth')
+        else:
+            Ws = [W] * (D-1) + [3]
+
+        # head
+        self.input_dim = input_dim * scale ** 2
+        self.head = nn.Sequential(*[nn.Linear(self.input_dim, Ws[0]), nn.ReLU(inplace=True)])
+        
+        # body
+        body = []
+        for i in range(1, D-1):
+            body += [nn.Linear(Ws[i-1], Ws[i]), nn.ReLU(inplace=True)]
+        self.body = nn.Sequential(*body)
+        
+        # tail
+        self.tail = nn.Linear(Ws[D-2], 3 * scale ** 2) if args.linear_tail \
+            else nn.Sequential(*[nn.Linear(Ws[D-2], 3 * scale ** 2), nn.Sigmoid()])
+        
+        # ************* path2 network to learn individual info *************
+        Ws2 = [int(x) for x in args.layerwise_netwidths2.split(',')] + [3]
+        self.head2 = nn.Sequential(*[nn.Linear(input_dim, Ws2[0]), nn.ReLU(inplace=True)])
+        body2 = []
+        for i in range(1, D-1):
+            body2 += [nn.Linear(Ws2[i-1], Ws2[i]), nn.ReLU(inplace=True)]
+        self.body2 = nn.Sequential(*body2)
+        self.tail2 = nn.Linear(Ws2[D-2], 3) if args.linear_tail \
+            else nn.Sequential(*[nn.Linear(Ws2[D-2], 3), nn.Sigmoid()])
+
+    def forward(self, x): # [n_ray, input_dim*scale**2]
+        # path1
+        x1 = self.head(x)
+        x1 = self.body(x1) + x1 if self.args.use_residual else self.body(x1) # [n_ray, 3*scale**2]
+        x1 = self.tail(x1)
+        # path2
+        x2 = x.view([x.shape[0], self.scale**2, -1])
+        x2 = x2.view(-1, x2.shape[-1])
+        x2 = self.head2(x2)
+        x2 = self.body2(x2) + x2 if self.args.use_residual else self.body2(x2) # [n_ray*scale**2, 3]
+        x2 = self.tail2(x2)
+        x2 = x2.view(x.shape[0], -1)
+        return x1 + x2
+
 
 class NeRF_v4(nn.Module):
     '''Spatial sharing. Two rays'''

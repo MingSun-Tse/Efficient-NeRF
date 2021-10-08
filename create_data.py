@@ -802,7 +802,7 @@ def train():
         timer = Timer(args.n_pose_kd)
         for i in range(1, args.n_pose_kd + 1):
             pose = get_rand_pose()
-            focal_ = focal * (np.random.rand() + 1) # scale focal by [1, 2)
+            focal_ = focal * (np.random.rand() + 1) if args.use_rand_focal else focal # scale focal by [1, 2)
             rays_o, rays_d = get_rays1(H, W, focal_, pose) # rays_o, rays_d shape: [H, W, 3]
             batch_rays = torch.stack([rays_o, rays_d], dim=0) # [2, H, W, 3]
             rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays, # when batch_rays are given, it will not create rays inside 'render'
@@ -850,7 +850,7 @@ def train():
                 num = data.shape[0] // split_size * split_size
                 for ix in range(0, num, split_size):
                     split += 1
-                    save_path = f'{datadir_kd_new}/data_{split % 40000}.npy' # to maintain similar total size
+                    save_path = f'{datadir_kd_new}/data_{split % args.max_save}.npy' # to maintain similar total size
                     d = data[ix: ix+split_size]
                     np.save(save_path, d)
                 print(f'[{i}/{args.n_pose_kd}] Saved data at "{datadir_kd_new}"')
