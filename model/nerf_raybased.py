@@ -593,7 +593,6 @@ class NeRF_v3_3(nn.Module):
                     nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=1), 
                     nn.BatchNorm2d(Ws[i]),
                     nn.ReLU(inplace=True)]
-
         self.body = nn.Sequential(*body)
         
         # tail
