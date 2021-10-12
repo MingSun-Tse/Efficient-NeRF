@@ -134,6 +134,8 @@ CUDA_VISIBLE_DEVICES=0 python create_data.py --create_data rand_images --config 
 ## nerf_v6 training
 CUDA_VISIBLE_DEVICES=4,5,6,7 python run_nerf_raybased.py --model_name nerf_v6 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 128 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v10_RandOriginsDirs_10kImages --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 32 --data_mode images_new --i_update_data 10000 --rand_crop_size 64 --use_residual --project nerfv6__lego__S16W1024D11_DPRGB_BS16ImagesCrop64_KDDataV10_Res_NoDir --cache_ignore data --screen --num_workers 24
 
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf_v6 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v10_RandOriginsDirs_10kImages --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 1 --data_mode images_new --use_residual --project nerfv6__lego__S16W256D11_DPRGB_Res_NoDir__Datav10_BS1 --cache_ignore data --screen --num_workers 4 --debug --i_video 10 --i_testset 10 --i_weights 10 # use BS=1 because 400x400=160,000 ~= 98,304, to see the effect of the data dist in a batch
+
 CUDA_VISIBLE_DEVICES=1 python create_data.py --create_data 3x3rays --config configs/lego.txt --teacher_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --n_pose_kd 10000000000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v11_3x3rays_queue --screen --project nerf__lego__CreateData_v11_3x3rays_queue --cache_ignore data
 
 ## nerf_v3.2 on SERVER138
