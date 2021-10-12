@@ -1365,9 +1365,7 @@ def train():
                 elif args.data_mode in ['images_new']:
                     rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, crop_size, crop_size, 3]
                     rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
-                    rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3) # [N_rand*crop_size*crop_size, 3]
-                    target_s = target_s.view(-1, 3) 
-                    # target_s = target_s.permute(0, 3, 1, 2) # [N_rand, 3, crop_size, crop_size]
+                    target_s = target_s.permute(0, 3, 1, 2) # [N_rand, 3, crop_size, crop_size]
                 
                 elif args.data_mode in ['16x16patches']:
                     rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, 16, 16, 3]
@@ -1477,7 +1475,7 @@ def train():
         elif args.model_name in ['nerf_v6']:
             model = render_kwargs_train['network_fn']
             perturb = render_kwargs_train['perturb']
-            shape = rays_o.shape
+            shape = rays_o.shape # [N_rand, crop_size, crop_size, 3]
             pts = point_sampler.sample_train(rays_o.view(-1, 3), rays_d.view(-1, 3), perturb=perturb)
             pts = positional_embedder(pts) # [N_rand*crop_size*crop_size, embed_dim]
             pts = pts.view(shape[0], shape[1], shape[2], -1) # [N_rand, crop_size, crop_size, embed_dim]
@@ -1546,7 +1544,7 @@ def train():
 
         # print logs of training
         if i % args.i_print == 0:
-            logstr = f"[TRAIN] Iter {i} data_time {data_time.val:.4f} ({data_time.avg:.4f}) batch_time {batch_time.val:.4f} ({batch_time.avg:.4f}) " + loss_line.format()
+            logstr = f"[TRAIN] Iter {i} data_time {data_time.val:.2f} ({data_time.avg:.2f}) batch_time {batch_time.val:.2f} ({batch_time.avg:.2f}) " + loss_line.format()
             print(logstr)
 
             # save image for check

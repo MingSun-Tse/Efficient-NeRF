@@ -211,6 +211,8 @@ parser.add_argument('--dim_rgb', type=int, default=3)
 parser.add_argument('--use_bn', action='store_true')
 parser.add_argument('--diverge_depth', type=int, default=6)
 parser.add_argument('--shuffle_input', action='store_true')
+parser.add_argument('--kernel_size', type=int, default=1)
+parser.add_argument('--padding', type=int, default=0)
 args = parser.parse_args()
 
 if args.video_tag == '':
