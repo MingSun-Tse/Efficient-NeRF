@@ -104,7 +104,23 @@ class PointSampler():
         pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_ray, n_sample, DIM_DIR]
         return pts.view(pts.shape[0], -1) # [n_ray, n_sample * DIM_DIR]
 
-    def sample_train2(self, rays_o, rays_d, perturb): # rays_o: [n_img, patch_h, patch_w, 3]
+    def sample_train2(self, rays_o, rays_d, perturb): 
+        '''rays_o: [n_img, patch_h, patch_w, 3] for CNN-style. Keep this for back-compatibility, please use sample_train_cnnstyle'''
+        z_vals = self.z_vals[None, None, None, :].expand(*rays_o.shape[:3], self.z_vals.shape[0]) # [n_img, patch_h, patch_w, n_sample]
+        if perturb > 0.:
+            # get intervals between samples
+            mids = .5 * (z_vals[..., 1:] + z_vals[..., :-1]) # [n_img, patch_h, patch_w, n_sample]
+            upper = torch.cat([mids, z_vals[..., -1:]], dim=-1)
+            lower = torch.cat([z_vals[..., :1],  mids], dim=-1)
+            # stratified samples in those intervals
+            t_rand = torch.rand(z_vals.shape[0]).to(device) # [n_img]
+            t_rand = t_rand[:, None, None, None].expand_as(z_vals)  # [n_img, patch_h, patch_w, n_sample]
+            z_vals = lower + (upper - lower) * t_rand  # [n_img, patch_h, patch_w, n_sample]
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_img, patch_h, patch_w, n_sample, 3]
+        return pts
+    
+    def sample_train_cnnstyle(self, rays_o, rays_d, perturb):
+        '''rays_o and rayd_d: [n_patch, 3, patch_h, patch_w]'''
         z_vals = self.z_vals[None, None, None, :].expand(*rays_o.shape[:3], self.z_vals.shape[0]) # [n_img, patch_h, patch_w, n_sample]
         if perturb > 0.:
             # get intervals between samples
@@ -129,12 +145,20 @@ class PositionalEmbedder():
         if self.include_input:
             y = torch.cat([y, x.unsqueeze(dim=-1)], dim=-1) # [n_ray, dim_pts, 2L+1]
         return y.view(y.shape[0], -1) # [n_ray, dim_pts*(2L+1)], example: 48*21=1008
-    def embed(self, x): # v2 of __call__
+    def embed(self, x): 
+        ''''for CNN-style. Keep this for back-compatibility, please use embed_cnnstyle'''
         y = x[..., :, None] * self.weights 
         y = torch.cat([torch.sin(y), torch.cos(y)], dim=-1) 
         if self.include_input:
             y = torch.cat([y, x.unsqueeze(dim=-1)], dim=-1)
         return y # [n_img, patch_h, patch_w, n_sample, 3, 2L+1]
+    def embed_cnnstyle(self, x):
+        y = x[..., :, None] * self.weights 
+        y = torch.cat([torch.sin(y), torch.cos(y)], dim=-1) 
+        if self.include_input:
+            y = torch.cat([y, x.unsqueeze(dim=-1)], dim=-1)
+        return y # [n_img, patch_h, patch_w, n_sample, 3, 2L+1]
+
 
 def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False, global_step=-1, print=print):
     """Transforms model's predictions to semantically meaningful values.
@@ -1038,3 +1062,53 @@ class NeRF_v6(nn.Module):
         x = self.head(x)
         x = self.body(x) + x if self.args.use_residual else self.body(x)
         return self.tail(x)
+
+class NeRF_v3_8(nn.Module):
+    '''U-Net style. Use conv for all layers'''
+    def __init__(self, args, input_dim):
+        super(NeRF_v3_8, self).__init__()
+        self.args = args
+        D, W = args.netdepth, args.netwidth
+
+        # network width
+        if args.layerwise_netwidths:
+            Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
+            print('Layer-wise widths are given. Overwrite args.netwidth')
+        else:
+            Ws = [W] * (D - 1) + [3]
+        
+        bn = True if hasattr(args, 'use_bn') and args.use_bn else False
+        
+        # head
+        self.input_dim = input_dim
+        self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=1), 
+                                nn.BatchNorm2d(Ws[0]),
+                                nn.ReLU(inplace=True)]) # keep the head and tail 1x1 conv. Only downsample/upsample in the middle layers
+
+        body = []
+        # body, downsample
+        for i in range(1, D//2):
+            body += [nn.ReflectionPad2d((1,1,1,1)), 
+                    nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=3, stride=1), 
+                    nn.BatchNorm2d(Ws[i]),
+                    nn.ReLU(inplace=True)]
+            if i % 2 == 0:
+                body += [nn.MaxPool2d(kernel_size=2,stride=2,return_indices=False)]
+        # body, upsample
+        for i in range(D//2, D-1):
+            body += [nn.ReflectionPad2d((1,1,1,1)),
+                    nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=3, stride=1),
+                    nn.BatchNorm2d(Ws[i]),
+                    nn.ReLU(inplace=True)]
+            if i % 2 == 0:
+                body += [nn.UpsamplingNearest2d(scale_factor=2)]
+        self.body = nn.Sequential(*body)
+        
+        # tail
+        self.tail = nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=1) if args.linear_tail \
+            else nn.Sequential(*[nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=1), nn.Sigmoid()])
+        
+    def forward(self, x): # x: [n_img, embed_dim, H, W]
+        x = self.head(x)
+        x = self.body(x) + x if self.args.use_residual else self.body(x)
+        return self.tail(x) # [n_img, 3, H, W]

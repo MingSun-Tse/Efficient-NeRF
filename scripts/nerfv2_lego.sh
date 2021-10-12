@@ -157,3 +157,5 @@ CUDA_VISIBLE_DEVICES=1,2,3 python run_nerf_raybased.py --model_name nerf_v3.7 --
 
 ## create data v12
 CUDA_VISIBLE_DEVICES=0 python create_data.py --create_data 16x16patches_v2 --config configs/lego.txt --teacher_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v12_16x16patchesv2_10kimages --screen --project nerf__lego_v12_16x16patchesv2_10kimages --cache_ignore data,Experiments,Experiments2
+
+CUDA_VISIBLE_DEVICES=1,2,3 python run_nerf_raybased.py --model_name nerf_v3.8 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v12_16x16patchesv2_10kimages --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 512 --data_mode 16x16patches_v2 --cache_ignore data,Experiments,Experiments2 --num_workers 12 --use_residual --i_update_data 10000 --screen --project nerfv3.3__lego__S16W256D11_DPRGB_BS512*16*16_KDDataV12_NoDir_Res

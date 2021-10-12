@@ -274,6 +274,27 @@ class BlenderDataset_v3(Dataset):
     def __len__(self):
         return len(self.all_imgs)
 
+class BlenderDataset_v4(Dataset):
+    '''Load 16x16patches_v2 data.'''
+    def __init__(self, datadir):
+        self.datadir = datadir
+        self.all_imgs = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('_rays_d.npy')]
+        print(f'Load data done. #All files: {len(self.all_imgs)}')
+
+    def __getitem__(self, index):
+        patch_path = self.all_imgs[index]
+        img_ix = patch_path.split('/')[-1].split('_')[0] # e.g., img9
+        rays_o_path = f'{self.datadir}/{img_ix}_rays_o.npy'
+        rays_o = torch.Tensor(np.load(rays_o_path)) # [3]
+        
+        data = torch.Tensor(np.load(patch_path)) # [16, 16, 6]
+        rays_d, rgb = data[..., :3], data[..., 3:6] # both: [16, 16, 3]
+        rays_o = rays_o[None, None, :].expand(data.shape[0], data.shape[1], 3) # [16, 16, 3]
+        return rays_o, rays_d, rgb
+    
+    def __len__(self):
+        return len(self.all_imgs)
+
 def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
     '''Even-spaced sampling'''
     near, far = 2, 6
