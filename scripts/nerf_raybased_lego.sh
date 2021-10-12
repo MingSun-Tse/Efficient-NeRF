@@ -141,6 +141,9 @@ CUDA_VISIBLE_DEVICES=1 python create_data.py --create_data 3x3rays --config conf
 ## nerf_v3.2 on SERVER138
 CUDA_VISIBLE_DEVICES=1,0 python3.8 run_nerf_raybased.py --model_name nerf_v3.2 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 1024 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 5 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --project nerfv3.2__lego__S16W1024D11_DPRGB_BS24576_KDDataV8_Hard0.2_20xBS_Res_NoDir --cache_ignore data --screen
 
+CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 39 --data_mode rays --use_residual --project nerfv3.2__lego__S16W256D11_DPRGB_Res_NoDir__DataV8_BS159744 --cache_ignore data --screen --debug --i_video 10 --i_testset 10 --i_weights 10 # BS159744 ~= 160,000. This exp is to run a baseline of width256 for reference.
+
+
 ## nerf_v3.5 on SERVER138
 CUDA_VISIBLE_DEVICES=0 python3.8 run_nerf_raybased.py --model_name nerf_v3.5 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 1024 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v10_RandOriginsDirs_10kImages --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 8 --data_mode images_new --rand_crop_size 64 --project nerfv3.5__lego__S16W1024D11_DPRGB_BS24576_KDDataV10_NoDir --cache_ignore data --screen --debug
 
