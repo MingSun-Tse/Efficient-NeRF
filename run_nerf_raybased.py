@@ -424,19 +424,8 @@ def create_nerf(args, near, far):
                                                                     netchunk=args.netchunk)
     elif args.model_name in ['nerf_v2']:
         model = NeRF_v2(args, near, far, print=netprint).to(device)
-        if args.freeze_pretrained:
-            assert args.pretrained_ckpt
-            model.eval()
-            for param in model.parameters():
-                param.requires_grad = False
-            print(f'Freeze model!')
-        else:
+        if not args.freeze_pretrained:
             grad_vars += list(model.parameters())
-        
-        if args.enhance_cnn == 'EDSR':
-            assert args.select_pixel_mode == 'rand_patch'
-            model_enhance = EDSR().to(device)
-            grad_vars += list(model_enhance.parameters())
         
         if args.init == 'orth':
             act_func = 'relu' # needs changes if the model does not use ReLU as activation func
@@ -445,51 +434,75 @@ def create_nerf(args, near, far):
 
     elif args.model_name in ['nerf_v3']:
         model = NeRF_v3(args, near, far).to(device)
-        grad_vars += list(model.parameters())
+        if not args.freeze_pretrained:
+            grad_vars += list(model.parameters())
     
     elif args.model_name in ['nerf_v3.2']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
         model = NeRF_v3_2(args, input_dim).to(device)
-        grad_vars += list(model.parameters())
+        if not args.freeze_pretrained:
+            grad_vars += list(model.parameters())
 
     elif args.model_name in ['nerf_v3.3']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
         model = NeRF_v3_3(args, input_dim).to(device)
-        grad_vars += list(model.parameters())
+        if not args.freeze_pretrained:
+            grad_vars += list(model.parameters())
 
     elif args.model_name in ['nerf_v3.4', 'nerf_v3.4.2']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
         model = NeRF_v3_4(args, input_dim, scale=args.scale).to(device)
-        grad_vars += list(model.parameters())
+        if not args.freeze_pretrained:
+            grad_vars += list(model.parameters())
 
     elif args.model_name in ['nerf_v3.6']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
         model = NeRF_v3_6(args, input_dim, scale=args.scale).to(device)
-        grad_vars += list(model.parameters())
+        if not args.freeze_pretrained:
+            grad_vars += list(model.parameters())
 
     elif args.model_name in ['nerf_v3.7']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
         model = NeRF_v3_7(args, input_dim, scale=args.scale).to(device)
-        grad_vars += list(model.parameters())
+        if not args.freeze_pretrained:
+            grad_vars += list(model.parameters())
 
     elif args.model_name in ['nerf_v3.8']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
         model = NeRF_v3_8(args, input_dim).to(device)
-        grad_vars += list(model.parameters())
+        if not args.freeze_pretrained:
+            grad_vars += list(model.parameters())
 
     elif args.model_name in ['nerf_v3.5']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
         model = NeRF_v3_5(args, input_dim, scale=args.scale).to(device)
-        grad_vars += list(model.parameters())
+        if not args.freeze_pretrained:
+            grad_vars += list(model.parameters())
 
     elif args.model_name in ['nerf_v4']:
         model = NeRF_v4(args, near, far).to(device)
-        grad_vars += list(model.parameters())
+        if not args.freeze_pretrained:
+            grad_vars += list(model.parameters())
 
     elif args.model_name in ['nerf_v6']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
         model = NeRF_v6(args, input_dim).to(device)
-        grad_vars += list(model.parameters())
+        if not args.freeze_pretrained:
+            grad_vars += list(model.parameters())
+    
+    # freeze pretrained model
+    if args.freeze_pretrained:
+        assert args.pretrained_ckpt
+        model.eval()
+        for param in model.parameters():
+            param.requires_grad = False
+        print(f'Freeze model!')
+    
+    # enhance cnn
+    if args.enhance_cnn == 'EDSR':
+        assert args.select_pixel_mode == 'rand_patch'
+        model_enhance = EDSR().to(device)
+        grad_vars += list(model_enhance.parameters())
 
     # in KD, there is a pretrained teacher
     if args.teacher_ckpt:
