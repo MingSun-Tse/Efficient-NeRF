@@ -1092,7 +1092,7 @@ class NeRF_v3_8(nn.Module):
                     nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=3, stride=1), 
                     nn.BatchNorm2d(Ws[i]),
                     nn.ReLU(inplace=True)]
-            if i % 2 == 0:
+            if i % (D//5) == 0: # D//5 is set empirically
                 body += [nn.MaxPool2d(kernel_size=2,stride=2,return_indices=False)]
         # body, upsample
         for i in range(D//2, D-1):
@@ -1100,7 +1100,7 @@ class NeRF_v3_8(nn.Module):
                     nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=3, stride=1),
                     nn.BatchNorm2d(Ws[i]),
                     nn.ReLU(inplace=True)]
-            if i % 2 == 0:
+            if i % (D//5) == 0:
                 body += [nn.UpsamplingNearest2d(scale_factor=2)]
         self.body = nn.Sequential(*body)
         
