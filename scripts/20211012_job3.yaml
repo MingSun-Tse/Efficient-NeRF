@@ -1,0 +1,15 @@
+# nerfv6__lego__S16W256D11_DPRGB_Res_NoDir__Datav10_BS4__BN
+docker_image: 107582380240.dkr.ecr.us-east-1.amazonaws.com/hwang10_efficient_nerf
+project_name: efficient_nerf
+project_support_alias: hwang10 # e.g. jren
+nfs: fs-0f183bfb.efs.us-east-1.amazonaws.com # cv-data
+gpu_type: nvidia-tesla-v100
+gpu_num: 2
+cpu_num: 8
+memory: 64
+script:
+  pre_run_event: "cd /nfs/hwang10/Projects/nerf-pytorch"
+  command: "CUDA_VISIBLE_DEVICES=0 python3.9 run_nerf_raybased.py --model_name nerf_v6 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 11 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v10_RandOriginsDirs_10kImages --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 4 --data_mode images_new --use_residual --project nerfv6__lego__S16W256D11_DPRGB_Res_NoDir__Datav10_BS4__BN --cache_ignore data --screen --num_workers 4 --use_bn" # your command; could be bash run.sh
+  jobs:
+  - name: hwang10_20211012_job3 # e.g. jren-gpu
+    args: {}
