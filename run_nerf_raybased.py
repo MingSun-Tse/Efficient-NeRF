@@ -341,7 +341,11 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             # enhance
             if 'network_enhance' in render_kwargs:
                 model_enhance = render_kwargs['network_enhance']
-                rgb = model_enhance(rgb, h=H, w=W)
+                if len(rgb.shape) == 3:
+                    rgb = rgb[None, ...] # [1, H, W, 3]
+                rgb = rgb.permute(0, 3, 1, 2)
+                rgb = model_enhance(rgb) # [1, 3, H, W]
+                rgb = rgb.permute(0, 2, 3, 1) # [1, H, W, 3]
 
             # reshape to image
             H_ = W_ = int(math.sqrt(rgb.numel() / 3)) # TODO-@mst: may not be square
@@ -500,7 +504,6 @@ def create_nerf(args, near, far):
     
     # enhance cnn
     if args.enhance_cnn == 'EDSR':
-        assert args.select_pixel_mode == 'rand_patch'
         model_enhance = EDSR().to(device)
         grad_vars += list(model_enhance.parameters())
 
@@ -1511,7 +1514,7 @@ def train():
         # enhance cnn rgb loss
         if args.enhance_cnn:
             model_enhance = render_kwargs_train['network_enhance']
-            rgb1 = model_enhance(rgb, h=patch_h, w=patch_w)
+            rgb1 = model_enhance(rgb)
             loss_rgb1 = img2mse(rgb1, target_s)
             psnr1 = mse2psnr(loss_rgb1)
             loss_line.update('psnr1', psnr1.item(), '.4f')

@@ -70,19 +70,12 @@ class EDSR(nn.Module):
         self.body = nn.Sequential(*m_body)
         self.tail = nn.Sequential(*m_tail)
 
-    def forward(self, x, h, w):
-        x = x.view([h, w, 3])
-        x = x.permute(2, 0, 1) # [3, patch_h, patch_w]
-        x = x.unsqueeze(0)
-
+    def forward(self, x): 
+        '''x: [n_patch, 3, patch_size, patch_size]'''
         # x = self.sub_mean(x)
         x = self.head(x)
         res = self.body(x)
         res += x
         x = self.tail(res)
         # x = self.add_mean(x)
-
-        x = x[0]
-        x = x.permute(1, 2, 0)
-        x = x.view(-1, 3)
         return x

@@ -1029,8 +1029,16 @@ class NeRF_v4(nn.Module):
         return rgbs
 
 NeRF_v5 = NeRF_v3_3 # to maintain back-compatibility
+
+def basic_conv_block(in_channels, out_channels, kernel_size, padding, bn=False):
+    block = [nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding), 
+                        nn.BatchNorm2d(out_channels),
+                        nn.ReLU(inplace=True)] if bn else \
+            [nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding), 
+                        nn.ReLU(inplace=True)]
+    return block
 class NeRF_v6(nn.Module):
-    '''Based on NeRF_v5, use 3x3 conv'''
+    '''Based on NeRF_v5, try to use 3x3 conv'''
     def __init__(self, args, input_dim):
         super(NeRF_v6, self).__init__()
         self.args = args
@@ -1043,15 +1051,18 @@ class NeRF_v6(nn.Module):
         else:
             Ws = [W] * (D - 1) + [3]
         
+        bn = True if hasattr(args, 'use_bn') and args.use_bn else False
+
         # head
-        ks, pd = 1, 0
+        ks, pd = args.kernel_size, args.padding
         self.input_dim = input_dim
-        self.head = nn.Sequential(*[nn.Conv2d(in_channels=input_dim, out_channels=Ws[0], kernel_size=ks, padding=pd), nn.ReLU(inplace=True)])
+        head = basic_conv_block(input_dim, Ws[0], ks, pd, bn)
+        self.head = nn.Sequential(*head)
         
         # body
         body = []
         for i in range(1, D - 1):
-            body += [nn.Conv2d(in_channels=Ws[i-1], out_channels=Ws[i], kernel_size=ks, padding=pd), nn.ReLU(inplace=True)]
+            body += basic_conv_block(Ws[i-1], Ws[i], ks, pd, bn)
         self.body = nn.Sequential(*body)
         
         # tail
@@ -1076,8 +1087,6 @@ class NeRF_v3_8(nn.Module):
             print('Layer-wise widths are given. Overwrite args.netwidth')
         else:
             Ws = [W] * (D - 1) + [3]
-        
-        bn = True if hasattr(args, 'use_bn') and args.use_bn else False
         
         # head
         self.input_dim = input_dim
