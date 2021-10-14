@@ -334,10 +334,13 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             
             elif args.model_name in ['nerf_v6']:
                 model_input = positional_embedder(point_sampler.sample_test(c2w)) # [n_ray, embed_dim]
-                model_input = model_input.view(1, model_input.shape[-1], H, W)
+                model_input = model_input.view(1, H, W, model_input.shape[-1])
+                model_input = model_input.permute(0, 3, 1, 2)
+                # model_input = model_input.view(1, model_input.shape[-1], H, W) # Note! mind the meaning of each axis
                 with torch.no_grad():
-                    rgb = model(model_input).permute(0, 2, 3, 1) # [1, 3, H, W]
-            
+                    rgb = model(model_input) # [1, 3, H, W]
+                    rgb = rgb.permute(0, 2, 3, 1) # [1, H, W, 3]
+
             # enhance
             if 'network_enhance' in render_kwargs:
                 model_enhance = render_kwargs['network_enhance']
