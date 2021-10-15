@@ -175,13 +175,8 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         W = int(W / render_factor)
         focal = focal / render_factor
     
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cudnn.deterministic = True
     render_kwargs['network_fn'].eval()
     rgbs, disps, errors, model_inputs = [], [], [], []
-    raybased_nerf = ['nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.4.2', 
-            'nerf_v3.6', 'nerf_v3.7', 'nerf_v3.5', 'nerf_v3.8', 'nerf_v4', 'nerf_v6']
-            
     for i, c2w in enumerate(render_poses):
         torch.cuda.synchronize()
         t0 = time.time()
@@ -189,7 +184,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         if args.model_name in ['nerf']:
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs) 
 
-        elif args.model_name in raybased_nerf:
+        else: # for our raybased nerf
             model = render_kwargs['network_fn']
             perturb = render_kwargs['perturb']
 
@@ -387,6 +382,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         test_loss, test_psnr, errors = None, None, None
     
     render_kwargs['network_fn'].train()
+    torch.cuda.empty_cache()
     return rgbs, disps, test_loss, test_psnr, errors
 
 
