@@ -934,7 +934,6 @@ def train():
         t0 = time.time()
         timer = Timer(args.n_pose_kd)
         for img_ix in range(1, args.n_pose_kd + 1):
-
             # core forward
             pose = get_rand_pose()
             focal_ = focal # * (np.random.rand() + 1) # scale focal by [1, 2) ==> use fixed focal!!
@@ -964,6 +963,70 @@ def train():
                 filename = f'{datadir_kd_new}/pseudo_sample_{img_ix}.png'
                 imageio.imwrite(filename, to8b(rgb))
 
+    elif args.create_data in ['16x16patches_v3']: # improve above 16x16patches
+        # set up data directory
+        if os.path.exists(datadir_kd_new):
+            if os.path.isfile(datadir_kd_new): 
+                os.remove(datadir_kd_new)
+            else:
+                shutil.rmtree(datadir_kd_new)
+        os.makedirs(datadir_kd_new)
+        print('Set up new data directory, done!')
+        
+        # set up model
+        render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
+        render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
+        render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
+        render_kwargs_.pop('teacher_fn')
+        render_kwargs_.pop('teacher_fine')
+
+        # run
+        patch_size, i_save, split_size, split, data_save = 16, 100, 625, 0, []
+        t0 = time.time()
+        timer = Timer(args.n_pose_kd)
+        for img_ix in range(1, args.n_pose_kd + 1):
+            # core forward
+            pose = get_rand_pose()
+            focal_ = focal # * (np.random.rand() + 1) # scale focal by [1, 2) ==> use fixed focal!!
+            rays_o, rays_d = get_rays1(H, W, focal_, pose) # rays_o, rays_d shape: [H, W, 3]
+            batch_rays = torch.stack([rays_o, rays_d], dim=0) # [2, H, W, 3]
+            rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays, # when batch_rays are given, it will not create rays inside 'render'
+                                            verbose=False, retraw=False,
+                                            **render_kwargs_)
+            
+            # save rays_d and rgb
+            data_ = torch.cat([rays_o, rays_d, rgb], dim=-1).data.cpu().numpy() # [H, W, 9]
+            num_h, num_w = H // patch_size, W // patch_size
+            for h_ix in range(num_h):
+                for w_ix in range(num_w):
+                    d = data_[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size, :] # [patch_size, patch_size, 9]
+                    data_save += [d]
+            
+            if img_ix % i_save == 0:
+                data_save = torch.stack(data_save, dim=0) # [n_patch, patch_size, patch_size, 6]
+                # shuffle
+                n_shuffle = 5
+                for _ in range(n_shuffle):
+                    rand_ix = np.random.permutation(data_save.shape[0])
+                    data_save = data_save[rand_ix]
+
+                # save
+                num = data_save.shape[0] // split_size * split_size
+                for ix in range(0, num, split_size):
+                    split += 1
+                    save_path = f'{datadir_kd_new}/data_{split % args.max_save}.npy' # to maintain similar total size
+                    d = data[ix: ix+split_size].data.cpu().numpy()
+                    np.save(save_path, d)
+                print(f'[{i}/{args.n_pose_kd}] Saved data at "{datadir_kd_new}"')
+                data_save = [] # reset
+
+            print(f'[{img_ix}/{args.n_pose_kd}] Using teacher to render more images... elapsed time: {(time.time() - t0):.2f}s')
+            print(f'Predicted finish time: {timer()}')
+
+            # check pseudo images
+            if img_ix <= 5:
+                filename = f'{datadir_kd_new}/pseudo_sample_{img_ix}.png'
+                imageio.imwrite(filename, to8b(rgb))
 
 if __name__=='__main__':
     train()
