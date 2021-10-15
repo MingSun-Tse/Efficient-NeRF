@@ -213,6 +213,7 @@ parser.add_argument('--diverge_depth', type=int, default=6)
 parser.add_argument('--shuffle_input', action='store_true')
 parser.add_argument('--kernel_size', type=int, default=1)
 parser.add_argument('--padding', type=int, default=0)
+parser.add_argument('--body_arch', type=str, default='conv', choices=['conv', 'resblock'])
 args = parser.parse_args()
 
 if args.video_tag == '':

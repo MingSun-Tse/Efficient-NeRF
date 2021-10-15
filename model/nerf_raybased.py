@@ -1030,44 +1030,72 @@ class NeRF_v4(nn.Module):
 
 NeRF_v5 = NeRF_v3_3 # to maintain back-compatibility
 
-def basic_conv_block(in_channels, out_channels, kernel_size, padding, bn=False):
+
+def basic_conv(in_channels, out_channels, kernel_size, padding, bn=False):
     block = [nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding), 
                         nn.BatchNorm2d(out_channels),
                         nn.ReLU(inplace=True)] if bn else \
             [nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding), 
                         nn.ReLU(inplace=True)]
-    return block
+    return nn.Sequential(*block)
+
+# This default_conv refers to EDSR PyTorch code in RCAN Github repo.
+def default_conv(in_channels, out_channels, kernel_size, bias=True):
+    return nn.Conv2d(
+        in_channels, out_channels, kernel_size,
+        padding=(kernel_size//2), bias=bias)
+
+# This ResBlock refers to EDSR PyTorch code in RCAN Github repo.
+class ResBlock(nn.Module):
+    def __init__(
+        self, conv, n_feat, kernel_size,
+        bias=True, bn=False, act=nn.ReLU(True), res_scale=1):
+        super(ResBlock, self).__init__()
+        m = []
+        for i in range(2):
+            m.append(conv(n_feat, n_feat, kernel_size, bias=bias))
+            if bn: m.append(nn.BatchNorm2d(n_feat))
+            if i == 0: m.append(act)
+
+        self.body = nn.Sequential(*m)
+        self.res_scale = res_scale
+
+    def forward(self, x):
+        res = self.body(x).mul(self.res_scale)
+        res += x
+        return res
+
 class NeRF_v6(nn.Module):
-    '''Based on NeRF_v5, try to use 3x3 conv'''
+    '''Based on NeRF_v5, try to use 3x3 conv. Extend it further, e.g., to EDSR-style arch.'''
     def __init__(self, args, input_dim):
         super(NeRF_v6, self).__init__()
         self.args = args
         D, W = args.netdepth, args.netwidth
+        bn = True if hasattr(args, 'use_bn') and args.use_bn else False
+        ks, pd = args.kernel_size, args.padding
 
         # network width
         if args.layerwise_netwidths:
             Ws = [int(x) for x in args.layerwise_netwidths.split(',')] + [3]
-            print('Layer-wise widths are given. Overwrite args.netwidth')
-        else:
-            Ws = [W] * (D - 1) + [3]
-        
-        bn = True if hasattr(args, 'use_bn') and args.use_bn else False
+            print('--layerwise_netwidths is NOT supposed to be used here. Please check! Exit.')
+            exit(1)
 
         # head
-        ks, pd = args.kernel_size, args.padding
         self.input_dim = input_dim
-        head = basic_conv_block(input_dim, Ws[0], ks, pd, bn)
+        head = basic_conv(input_dim, W, ks, pd, bn=bn)
         self.head = nn.Sequential(*head)
         
         # body
-        body = []
-        for i in range(1, D - 1):
-            body += basic_conv_block(Ws[i-1], Ws[i], ks, pd, bn)
+        if args.body_arch in ['conv']:
+            body = [basic_conv(W, W, ks, pd, bn=bn) for _ in range(D - 2)]
+        elif args.body_arch in ['resblock']:
+            n_resblock = (D - 2) // 2 # each resblock has 2 conv layers
+            body = [ResBlock(default_conv, W, ks, bn=bn) for _ in range(n_resblock)]
         self.body = nn.Sequential(*body)
-        
+
         # tail
-        self.tail = nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=ks, padding=pd) if args.linear_tail \
-            else nn.Sequential(*[nn.Conv2d(in_channels=Ws[i], out_channels=3, kernel_size=ks, padding=pd), nn.Sigmoid()])
+        self.tail = nn.Conv2d(in_channels=W, out_channels=3, kernel_size=ks, padding=pd) if args.linear_tail \
+            else nn.Sequential(*[nn.Conv2d(in_channels=W, out_channels=3, kernel_size=ks, padding=pd), nn.Sigmoid()])
         
     def forward(self, x):
         x = self.head(x)
