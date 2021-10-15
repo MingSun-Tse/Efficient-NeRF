@@ -172,7 +172,7 @@ parser.add_argument('--enhance_cnn', type=str, default='', choices=['', 'EDSR', 
 parser.add_argument('--freeze_pretrained', action='store_true')
 parser.add_argument('--focal_scale', type=float, default=1.)
 parser.add_argument('--data_mode', type=str, default='images', choices=['images', 'rays', 'images_new', '16x16patches',
-        '16x16patches_v2'],
+        '16x16patches_v2', '16x16patches_v3'],
         help='which data is used in training, sample rays from images or directly load rays')
 parser.add_argument('--num_workers', type=int, default=8, 
         help='#cpus when loading data')

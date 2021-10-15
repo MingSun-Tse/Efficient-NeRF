@@ -919,7 +919,7 @@ def get_dataloader(dataset_type, datadir, pseudo_ratio=0.5):
                     pin_memory=True,
                     sampler=InfiniteSamplerWrapper(len(trainset))
             )
-        elif args.data_mode in ['rays']:
+        elif args.data_mode in ['rays', '16x16patches_v3']:
             trainset = BlenderDataset_v2(datadir, dim_dir=DIM_DIR, dim_rgb=DIM_RGB)
             trainloader = torch.utils.data.DataLoader(dataset=trainset, 
                     batch_size=args.N_rand,
@@ -1326,7 +1326,7 @@ def train():
                     n_seen_img += 1
                     loss_line.update('pseudo_img_ratio', n_pseudo_img/ n_seen_img, '.4f')
                 
-                elif args.data_mode in ['rays', '16x16patches_v2']:
+                elif args.data_mode in ['rays', '16x16patches_v2', '16x16patches_v3']:
                     if i % args.i_update_data == 0: # update trainloader, possibly load more data
                         if args.dataset_type == 'blender':
                             t_ = time.time()
@@ -1396,6 +1396,14 @@ def train():
                     rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, 16, 16, 3]
                     rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
                     target_s = target_s.permute(0, 3, 1, 2) # [N_rand, 3, 16, 16]
+
+                elif args.data_mode in ['16x16patches_v3']:
+                    rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, 32, 16, 16, 3]
+                    rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
+                    rays_o = rays_o.view(-1, *rays_o.shape[-3:]) # [N_rand*32, 16, 16, 3]
+                    rays_d = rays_d.view(-1, *rays_d.shape[-3:]) # [N_rand*32, 16, 16, 3]
+                    target_s = target_s.view(-1, *target_s.shape[-3:]) # [N_rand*32, 16, 16, 3]
+                    target_s = target_s.permute(0, 3, 1, 2) # [N_rand*32, 3, 16, 16]
 
             batch_size = rays_o.shape[0]
             if args.hard_ratio:
@@ -1563,7 +1571,7 @@ def train():
 
         # print logs of training
         if i % args.i_print == 0:
-            logstr = f"[TRAIN] Iter {i} data_time {data_time.val:.2f} ({data_time.avg:.2f}) batch_time {batch_time.val:.2f} ({batch_time.avg:.2f}) " + loss_line.format()
+            logstr = f"[TRAIN] Iter {i} data_time {data_time.val:.4f} ({data_time.avg:.4f}) batch_time {batch_time.val:.4f} ({batch_time.avg:.4f}) " + loss_line.format()
             print(logstr)
 
             # save image for check
