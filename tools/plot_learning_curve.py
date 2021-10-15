@@ -1,7 +1,19 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import FormatStrFormatter # set ytick precision
-import sys, glob
+import sys, glob, os
+import configargparse
+
+
+parser = configargparse.ArgumentParser()
+parser.add_argument("--mode", type=str, default='test')
+parser.add_argument("--exp_mark", type=str, default='')
+parser.add_argument("--iter_mark", type=str, default='Iter')
+parser.add_argument("--testline_mark", type=str, default='[TEST]')
+parser.add_argument("--trainline_mark", type=str, default='[TRAIN]')
+parser.add_argument("--max_iter", type=int, default=-1, help='the max iter in plots')
+args = parser.parse_args()
+
 
 def parse_ExpID(path):
     '''parse out the ExpID from 'path', which can be a file or directory.
@@ -32,28 +44,36 @@ def _get_value(line, key, type_func=float, exact_key=True):
 figsize = (6, 4)
 fig, ax = plt.subplots(figsize=figsize, nrows=1, ncols=1)
 
-def plot_once(expid, logf, color, mode='test'):
+
+def plot_once(expid, logf, color):
     step, test_psnr, train_hist_psnr = [], [], []
     for line in open(logf):
-        if mode == 'test' and '[TEST]' in line:
-            step += [_get_value(line, 'Iter')]
+        if args.mode == 'test' and args.testline_mark in line:
+            it = _get_value(line, 'Iter')
+            if args.max_iter > 0 and it > args.max_iter:
+                break
+            step += [it]
             test_psnr += [_get_value(line, 'PSNR')]
             train_hist_psnr += [_get_value(line, 'Train_HistPSNR')]
         
-        if mode == 'train' and '[TRAIN]' in line:
-            step += [_get_value(line, 'Iter')]
+        if args.mode == 'train' and args.trainline_mark in line:
+            it = _get_value(line, 'Iter')
+            if args.max_iter > 0 and it > args.max_iter:
+                break
+            step += [it]
             train_hist_psnr += [_get_value(line, 'hist_psnr')]
+        
     
     # print(step, test_psnr, train_hist_psnr)
-    if mode == 'test':
+    if args.mode == 'test':
         ax.plot(step, test_psnr, label=f'Test_PSNR [{expid}]', color=color, linestyle='solid')
         ax.plot(step, train_hist_psnr, label=f'Train_HistPSNR [{expid}]', color=color, linestyle='dashed')
-    if mode == 'train':
+    if args.mode == 'train':
         ax.plot(step, train_hist_psnr, label=f'Train_HistPSNR [{expid}]', color=color, linestyle='dashed')
 
 # get the path of log files
 logfiles = []
-for mark in sys.argv[1].split(','):
+for mark in args.exp_mark.split(','):
     logs = glob.glob(f'Experiments/*{mark}*/log/log.txt')
     assert len(logs) == 1
     logfiles += [logs[0]]
@@ -61,23 +81,23 @@ for mark in sys.argv[1].split(','):
 # main plot
 colors = ['r', 'b', 'k', 'g']
 ExpIDs, save_paths = [], []
-mode = sys.argv[2]
 for i, logf in enumerate(logfiles):
     ExpID = parse_ExpID(logf)
     ExpIDs += [ExpID]
-    save_paths += [logf.replace('.txt', f'_learning_curve_{mode}.jpg')]
+    save_paths += [logf.replace('.txt', f'_learning_curve_{args.mode}.jpg')]
     expid = ExpID.split('-')[-1]
-    plot_once(expid, logf, colors[i], mode=mode)
+    plot_once(expid, logf, colors[i])
 
 # set title with ExpIDs
 title = ','.join(ExpIDs)
 ax.set_title(title)
-ax.grid(True)
+ax.grid(True, linestyle='dotted')
 ax.legend()
 
 for p in save_paths:
     fig.savefig(p)
-    print(f'save plot to {p}')
+    d = f'{os.getcwd()}/{os.path.split(p)[0]}'
+    print(f'save plot to folder: {d}')
 
 
 '''Usage:
