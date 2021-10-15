@@ -279,6 +279,9 @@ class BlenderDataset_v4(Dataset):
     def __init__(self, datadir):
         self.datadir = datadir
         self.all_imgs = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('_rays_d.npy')]
+        # check num of files, only continue when it meets a predefined number
+        while len(self.all_imgs) < 225000: # this is the rough number of rays_d.npy files that can be generated in 1 hr (3600/10*625)
+            time.sleep(30)
         print(f'Load data done. #All files: {len(self.all_imgs)}')
 
     def __getitem__(self, index):
