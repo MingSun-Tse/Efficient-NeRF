@@ -1172,7 +1172,7 @@ def train():
             kd_targets = get_teacher_targets_v2(kd_poses, H, W, focal, render_kwargs_train, args, pose_tag=args.n_pose_kd)
             n_total_img = len(kd_poses) + len(train_images)
             pr = len(kd_poses) / n_total_img
-        print(f'Loaded data. Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f} ')
+        print(f'Loaded data. Now total #train files: {n_total_img}')
 
     # get video_targets
     video_targets = None
@@ -1306,7 +1306,7 @@ def train():
                             t_ = time.time()
                             pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
                             trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
-                            print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {n_total_img} Pseudo_ratio: {pr:.4f}')
+                            print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train files: {n_total_img}')
 
                     # get pose and target
                     if args.dataset_type == 'blender':
@@ -1331,7 +1331,7 @@ def train():
                         if args.dataset_type == 'blender':
                             t_ = time.time()
                             trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
-                            print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train images: {n_total_img}')
+                            print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train files: {n_total_img}')
                 
             # get rays (rays_o, rays_d, target_s)
             if N_rand is not None:
@@ -1600,7 +1600,7 @@ def train():
                 *_, test_loss, test_psnr, errors = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, 
                     savedir=testsavedir, render_factor=args.render_factor)
                 t_test = time.time() - t_
-            accprint(f'[TEST] Iter {i} Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f} Train_HistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s')
+            accprint(f'[TEST] Iter {i} PSNR {test_psnr.item():.4f} Train_HistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s')
             print(f'Saved rendered test images: "{testsavedir}"')
             print(f'Predicted finish time: {timer()}')
 
