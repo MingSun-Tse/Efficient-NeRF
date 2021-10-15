@@ -971,7 +971,7 @@ def train():
             else:
                 shutil.rmtree(datadir_kd_new)
         os.makedirs(datadir_kd_new)
-        print('Set up new data directory, done!')
+        print(f'Set up new data directory: {datadir_kd_new}, done!')
         
         # set up model
         render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
@@ -981,7 +981,7 @@ def train():
         render_kwargs_.pop('teacher_fine')
 
         # run
-        patch_size, i_save, split_size, split, data_save = 16, 100, 625, 0, []
+        patch_size, i_save, split_size, split, data_save = 16, 100, 32, 0, []
         t0 = time.time()
         timer = Timer(args.n_pose_kd)
         for img_ix in range(1, args.n_pose_kd + 1):
@@ -995,7 +995,7 @@ def train():
                                             **render_kwargs_)
             
             # save rays_d and rgb
-            data_ = torch.cat([rays_o, rays_d, rgb], dim=-1).data.cpu().numpy() # [H, W, 9]
+            data_ = torch.cat([rays_o, rays_d, rgb], dim=-1).data.cpu() # [H, W, 9]
             num_h, num_w = H // patch_size, W // patch_size
             for h_ix in range(num_h):
                 for w_ix in range(num_w):
@@ -1015,9 +1015,9 @@ def train():
                 for ix in range(0, num, split_size):
                     split += 1
                     save_path = f'{datadir_kd_new}/data_{split % args.max_save}.npy' # to maintain similar total size
-                    d = data[ix: ix+split_size].data.cpu().numpy()
+                    d = data_save[ix: ix+split_size].data.cpu().numpy()
                     np.save(save_path, d)
-                print(f'[{i}/{args.n_pose_kd}] Saved data at "{datadir_kd_new}"')
+                print(f'[{img_ix}/{args.n_pose_kd}] Saved data at "{datadir_kd_new}"')
                 data_save = [] # reset
 
             print(f'[{img_ix}/{args.n_pose_kd}] Using teacher to render more images... elapsed time: {(time.time() - t0):.2f}s')
