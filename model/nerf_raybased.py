@@ -1110,7 +1110,9 @@ class NeRF_v6_enhance(nn.Module):
         self.base = NeRF_v6(args, input_dim).to(device)
         self.enhance = EDSR(n_resblock=args.enhance_n_resblock, n_feats=args.enhance_width).to(device)
     def forward(self, x):
-        return self.enhance(self.base(x))
+        x = self.base(x)
+        x1 = self.enhance(x.detach()) if args.enhance_separate_train else self.enhance(x) 
+        return x, x1
 
 
 class NeRF_v3_8(nn.Module):

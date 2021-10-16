@@ -216,6 +216,7 @@ parser.add_argument('--padding', type=int, default=0)
 parser.add_argument('--body_arch', type=str, default='conv', choices=['conv', 'resblock'])
 parser.add_argument('--enhance_width', type=int, default=64)
 parser.add_argument('--enhance_n_resblock', type=int, default=5)
+parser.add_argument('--enhance_separate_train', action='store_true')
 args = parser.parse_args()
 
 if args.video_tag == '':
