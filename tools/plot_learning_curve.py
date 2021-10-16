@@ -80,11 +80,12 @@ for mark in args.exp_mark.split(','):
 
 # main plot
 colors = ['r', 'b', 'k', 'g']
-ExpIDs, save_paths = [], []
+savename = f'log_learning_curve_{args.mode}.jpg'
+ExpIDs, save_paths = [], [f'./{savename}'] # also save to current folder for easy check
 for i, logf in enumerate(logfiles):
     ExpID = parse_ExpID(logf)
     ExpIDs += [ExpID]
-    save_paths += [logf.replace('.txt', f'_learning_curve_{args.mode}.jpg')]
+    save_paths += [f'{os.path.split(logf)[0]}/{savename}']
     expid = ExpID.split('-')[-1]
     plot_once(expid, logf, colors[i])
 
@@ -99,8 +100,7 @@ for p in save_paths:
     d = f'{os.getcwd()}/{os.path.split(p)[0]}'
     print(f'save plot to folder: {d}')
 
-
 '''Usage:
-py tools/plot_learning_curve.py 011145,011413 test
+py tools/plot_learning_curve.py --exp_mark 115744,041059 --max_iter 20000 --mode test
 '''
 
