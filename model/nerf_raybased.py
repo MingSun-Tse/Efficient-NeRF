@@ -1096,11 +1096,21 @@ class NeRF_v6(nn.Module):
         # tail
         self.tail = nn.Conv2d(in_channels=W, out_channels=3, kernel_size=ks, padding=pd) if args.linear_tail \
             else nn.Sequential(*[nn.Conv2d(in_channels=W, out_channels=3, kernel_size=ks, padding=pd), nn.Sigmoid()])
-        
+
     def forward(self, x):
         x = self.head(x)
         x = self.body(x) + x if self.args.use_residual else self.body(x)
         return self.tail(x)
+
+class NeRF_v6_enhance(nn.Module):
+    def __init__(self, args, input_dim):
+        super(NeRF_v6_enhance, self).__init__()
+        from .enhance_cnn import EDSR
+        self.base = NeRF_v6(args, input_dim).to(device)
+        self.enhance = EDSR(n_resblock=args.enhance_n_resblock, n_feats=args.enhance_width).to(device)
+    def forward(self, x):
+        return self.enhance(self.base(x))
+
 
 class NeRF_v3_8(nn.Module):
     '''U-Net style. Use conv for all layers'''

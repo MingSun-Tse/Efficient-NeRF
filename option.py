@@ -121,7 +121,7 @@ parser.add_argument('--cache_ignore', type=str, default='')
 # @mst: related to nerf_v2
 parser.add_argument('--model_name', type=str, default='nerf_v2', 
         choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.4.2', 'nerf_v3.6', 'nerf_v3.7',
-        'nerf_v3.5', 'nerf_v3.8', 'nerf_v4', 'nerf_v6'])
+        'nerf_v3.5', 'nerf_v3.8', 'nerf_v4', 'nerf_v6', 'nerf_v6_enhance'])
 parser.add_argument('--N_iters', type=int, default=200000)
 parser.add_argument('--skips', type=str, default='4')
 parser.add_argument('--D_head', type=int, default=4)
@@ -214,6 +214,8 @@ parser.add_argument('--shuffle_input', action='store_true')
 parser.add_argument('--kernel_size', type=int, default=1)
 parser.add_argument('--padding', type=int, default=0)
 parser.add_argument('--body_arch', type=str, default='conv', choices=['conv', 'resblock'])
+parser.add_argument('--enhance_width', type=int, default=64)
+parser.add_argument('--enhance_n_resblock', type=str, default=5)
 args = parser.parse_args()
 
 if args.video_tag == '':

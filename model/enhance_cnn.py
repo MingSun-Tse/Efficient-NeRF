@@ -38,12 +38,9 @@ class ResBlock(nn.Module):
         return res
 
 class EDSR(nn.Module):
-    '''Refer to: https://github.com/yulunzhang/RCAN/blob/master/RCAN_TrainCode/code/model/edsr.py
-    '''
-    def __init__(self):
+    '''Refer to: https://github.com/yulunzhang/RCAN/blob/master/RCAN_TrainCode/code/model/edsr.py'''
+    def __init__(self, n_resblock=10, n_feats=64):
         super(EDSR, self).__init__()
-        n_resblock = 10
-        n_feats = 64 # num of filters in each layer
         kernel_size = 3
         n_colors = 3
         conv = default_conv
