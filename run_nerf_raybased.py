@@ -1511,7 +1511,7 @@ def train():
             pts = pts.permute(0, 3, 1, 2) # [N_rand, embed_dim, crop_size, crop_size]
             rgb, rgb1 = model(pts) # [N_rand, 3, crop_size, crop_size]
             
-            loss_rgb1 = img2mse(rgb1, target_s)
+            loss_rgb1 = img2mse(rgb1, target_s) * args.lw_rgb1
             psnr1 = mse2psnr(loss_rgb1)
             hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
             loss_line.update('hist_psnr1', hist_psnr1, '.4f')
@@ -1520,7 +1520,7 @@ def train():
 
         
         # rgb loss
-        loss_rgb = img2mse(rgb, target_s)
+        loss_rgb = img2mse(rgb, target_s) * args.lw_rgb
         psnr = mse2psnr(loss_rgb)
         loss_line.update('psnr', psnr.item(), '.4f')
         if not (args.enhance_cnn and args.freeze_pretrained):
@@ -1585,9 +1585,9 @@ def train():
             print(logstr)
 
             # save image for check
-            if args.enhance_cnn and i % (100 * args.i_print) == 0:
+            if 'rgb1' in locals() and i % (100 * args.i_print) == 0:
                 img = rgb1.reshape([patch_h, patch_w, 3])
-                save_path = f'{logger.gen_img_path}/train_patch_{ExpID}_iter{i}.png'
+                save_path = f'{logger.gen_img_path}/rgb1_{ExpID}_iter{i}.png'
                 imageio.imwrite(save_path, to8b(img))
 
         # check gradients to make sure group_l2 works normally
