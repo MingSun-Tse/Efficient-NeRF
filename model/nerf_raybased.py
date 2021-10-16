@@ -1106,12 +1106,13 @@ class NeRF_v6_enhance(nn.Module):
     def __init__(self, args, input_dim):
         super(NeRF_v6_enhance, self).__init__()
         from .enhance_cnn import EDSR
+        self.args = args
         self.input_dim = input_dim
         self.base = NeRF_v6(args, input_dim).to(device)
         self.enhance = EDSR(n_resblock=args.enhance_n_resblock, n_feats=args.enhance_width).to(device)
     def forward(self, x):
         x = self.base(x)
-        x1 = self.enhance(x.detach()) if args.enhance_separate_train else self.enhance(x) 
+        x1 = self.enhance(x.detach().clone()) if self.args.enhance_separate_train else self.enhance(x)
         return x, x1
 
 
