@@ -219,6 +219,7 @@ parser.add_argument('--enhance_n_resblock', type=int, default=5)
 parser.add_argument('--enhance_separate_train', action='store_true')
 parser.add_argument('--lw_rgb', type=float, default=1)
 parser.add_argument('--lw_rgb1', type=float, default=1)
+parser.add_argument('--iter_size', type=int, default=1)
 args = parser.parse_args()
 
 if args.video_tag == '':

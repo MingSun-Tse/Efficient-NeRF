@@ -1269,6 +1269,7 @@ def train():
         t0 = time.time()
         global_step = i
         loss_line = LossLine()
+        loss, rgb1 = 0, None
 
         # update LR
         if args.lr: # use our own lr schedule
@@ -1280,267 +1281,278 @@ def train():
             for param_group in optimizer.param_groups:
                 param_group['lr'] = new_lrate
 
-        # Sample random ray batch
-        if use_batching: # @mst: False in default
-            # Random over all images
-            batch = rays_rgb[i_batch: i_batch+N_rand] # [B, 2+1, 3*?]
-            batch = torch.transpose(batch, 0, 1)
-            batch_rays, target_s = batch[:2], batch[2]
+        # >>>>>>>>>>> inner loop (get data, forward, add loss) begins >>>>>>>>>>>
+        for _ in range(args.iter_size):
+            # Sample random ray batch
+            if use_batching: # @mst: False in default
+                # Random over all images
+                batch = rays_rgb[i_batch: i_batch+N_rand] # [B, 2+1, 3*?]
+                batch = torch.transpose(batch, 0, 1)
+                batch_rays, target_s = batch[:2], batch[2]
 
-            i_batch += N_rand
-            if i_batch >= rays_rgb.shape[0]:
-                print("Shuffle data after an epoch!")
-                rand_idx = torch.randperm(rays_rgb.shape[0])
-                rays_rgb = rays_rgb[rand_idx]
-                i_batch = 0
-        
-        else:
-            # Random from one image
-            img_i = np.random.choice(i_train)
-            target = images[img_i]
-            pose = poses[img_i, :3,:4]
-            
-            # KD, update dataloader
-            if args.datadir_kd:
-                if args.data_mode in ['images']:
-                    if i % args.i_update_data == 0: # update trainloader, possibly load more data
+                i_batch += N_rand
+                if i_batch >= rays_rgb.shape[0]:
+                    print("Shuffle data after an epoch!")
+                    rand_idx = torch.randperm(rays_rgb.shape[0])
+                    rays_rgb = rays_rgb[rand_idx]
+                    i_batch = 0
+            else:
+                # Random from one image
+                img_i = np.random.choice(i_train)
+                target = images[img_i]
+                pose = poses[img_i, :3,:4]
+                
+                # KD, update dataloader
+                if args.datadir_kd:
+                    if args.data_mode in ['images']:
+                        if i % args.i_update_data == 0: # update trainloader, possibly load more data
+                            if args.dataset_type == 'blender':
+                                t_ = time.time()
+                                pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
+                                trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
+                                print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train files: {n_total_img}')
+
+                        # get pose and target
                         if args.dataset_type == 'blender':
-                            t_ = time.time()
-                            pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
-                            trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
-                            print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train files: {n_total_img}')
-
-                    # get pose and target
-                    if args.dataset_type == 'blender':
-                        target, pose, img_i = [x[0] for x in trainloader.next()] # batch size = 1
-                        target, pose = target.to(device), pose.to(device)
-                        pose = pose[:3, :4]
-                        if img_i >= n_original_img:
-                            n_pseudo_img += 1
-                    else: # LLFF dataset
-                        use_pseudo_img = torch.rand(1) < len(kd_poses) / (len(train_poses) + len(kd_poses))
-                        if use_pseudo_img:
-                            img_i = np.random.permutation(len(kd_poses))[0]
-                            pose = kd_poses[img_i, :3, :4]
-                            target = kd_targets[img_i]
-                            n_pseudo_img += 1
+                            target, pose, img_i = [x[0] for x in trainloader.next()] # batch size = 1
+                            target, pose = target.to(device), pose.to(device)
+                            pose = pose[:3, :4]
+                            if img_i >= n_original_img:
+                                n_pseudo_img += 1
+                        else: # LLFF dataset
+                            use_pseudo_img = torch.rand(1) < len(kd_poses) / (len(train_poses) + len(kd_poses))
+                            if use_pseudo_img:
+                                img_i = np.random.permutation(len(kd_poses))[0]
+                                pose = kd_poses[img_i, :3, :4]
+                                target = kd_targets[img_i]
+                                n_pseudo_img += 1
+                        
+                        n_seen_img += 1
+                        loss_line.update('pseudo_img_ratio', n_pseudo_img/ n_seen_img, '.4f')
                     
-                    n_seen_img += 1
-                    loss_line.update('pseudo_img_ratio', n_pseudo_img/ n_seen_img, '.4f')
-                
-                elif args.data_mode in ['rays', '16x16patches_v2', '16x16patches_v3']:
-                    if i % args.i_update_data == 0: # update trainloader, possibly load more data
-                        if args.dataset_type == 'blender':
-                            t_ = time.time()
-                            trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
-                            print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train files: {n_total_img}')
-                
-            # get rays (rays_o, rays_d, target_s)
-            if N_rand is not None:
-                if args.data_mode in ['images']:
-                    rays_o, rays_d = get_rays(H, W, focal, pose)  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
-                    if i < args.precrop_iters:
-                        dH = int(H//2 * args.precrop_frac)
-                        dW = int(W//2 * args.precrop_frac)
-                        coords = torch.stack(
-                            torch.meshgrid(
-                                torch.linspace(H//2 - dH, H//2 + dH - 1, 2*dH), 
-                                torch.linspace(W//2 - dW, W//2 + dW - 1, 2*dW)
-                            ), -1)
-                        if i == start + 1:
-                            print(f"[Config] Center cropping of size {2*dH} x {2*dW} is enabled until iter {args.precrop_iters}")                
-                    else:
-                        coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W)), -1)  # (H, W, 2)
-
-                    # select pixels as a batch
-                    select_coords, patch_bbx = get_selected_coords(coords, N_rand, args.select_pixel_mode)
-
-                    # get rays_o and rays_d for the selected pixels
-                    rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-                    rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-                    batch_rays = torch.stack([rays_o, rays_d], 0)
+                    elif args.data_mode in ['rays', '16x16patches_v2', '16x16patches_v3']:
+                        if i % args.i_update_data == 0: # update trainloader, possibly load more data
+                            if args.dataset_type == 'blender':
+                                t_ = time.time()
+                                trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
+                                print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train files: {n_total_img}')
                     
-                    # get target for the selected pixels
-                    target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-                
-                elif args.data_mode in ['rays']:
-                    rays_o, rays_d, target_s = trainloader.next() # rays_o: [N_rand, 4096, 3] rays_d: [N_rand, 4096, DIM_DIR] target_s: [N_rand, 4096, DIM_RGB]
-                    rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
-                    rays_o = rays_o.view(-1, 3) # [N_rand*4096, 3]
-                    rays_d = rays_d.view(-1, DIM_DIR) # [N_rand*4096, DIM_DIR]
-                    target_s = target_s.view(-1, DIM_RGB) # [N_rand*4096, DIM_RGB]
+                # get rays (rays_o, rays_d, target_s)
+                if N_rand is not None:
+                    if args.data_mode in ['images']:
+                        rays_o, rays_d = get_rays(H, W, focal, pose)  # (H, W, 3), (H, W, 3), origin: (-1.8393, -1.0503,  3.4298)
+                        if i < args.precrop_iters:
+                            dH = int(H//2 * args.precrop_frac)
+                            dW = int(W//2 * args.precrop_frac)
+                            coords = torch.stack(
+                                torch.meshgrid(
+                                    torch.linspace(H//2 - dH, H//2 + dH - 1, 2*dH), 
+                                    torch.linspace(W//2 - dW, W//2 + dW - 1, 2*dW)
+                                ), -1)
+                            if i == start + 1:
+                                print(f"[Config] Center cropping of size {2*dH} x {2*dW} is enabled until iter {args.precrop_iters}")                
+                        else:
+                            coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W)), -1)  # (H, W, 2)
 
-                    if args.shuffle_input:
-                        rays_d = rays_d.view(rays_d.shape[0], DIM_DIR//3, 3) # [N_rand*4096, DIM_DIR//3, 3]
-                        target_s = target_s.view(target_s.shape[0], DIM_RGB//3, 3) # [N_rand*4096, DIM_RGB//3, 3]
-                        shuffle_input_randix = torch.randperm(DIM_DIR//3)
-                        rays_d = rays_d[:, shuffle_input_randix, :]
-                        target_s = target_s[:, shuffle_input_randix, :]
-                        rays_d = rays_d.view(-1, DIM_DIR) # [N_rand*4096, DIM_DIR] 
+                        # select pixels as a batch
+                        select_coords, patch_bbx = get_selected_coords(coords, N_rand, args.select_pixel_mode)
+
+                        # get rays_o and rays_d for the selected pixels
+                        rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+                        rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+                        batch_rays = torch.stack([rays_o, rays_d], 0)
+                        
+                        # get target for the selected pixels
+                        target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+                    
+                    elif args.data_mode in ['rays']:
+                        rays_o, rays_d, target_s = trainloader.next() # rays_o: [N_rand, 4096, 3] rays_d: [N_rand, 4096, DIM_DIR] target_s: [N_rand, 4096, DIM_RGB]
+                        rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
+                        rays_o = rays_o.view(-1, 3) # [N_rand*4096, 3]
+                        rays_d = rays_d.view(-1, DIM_DIR) # [N_rand*4096, DIM_DIR]
                         target_s = target_s.view(-1, DIM_RGB) # [N_rand*4096, DIM_RGB]
+
+                        if args.shuffle_input:
+                            rays_d = rays_d.view(rays_d.shape[0], DIM_DIR//3, 3) # [N_rand*4096, DIM_DIR//3, 3]
+                            target_s = target_s.view(target_s.shape[0], DIM_RGB//3, 3) # [N_rand*4096, DIM_RGB//3, 3]
+                            shuffle_input_randix = torch.randperm(DIM_DIR//3)
+                            rays_d = rays_d[:, shuffle_input_randix, :]
+                            target_s = target_s[:, shuffle_input_randix, :]
+                            rays_d = rays_d.view(-1, DIM_DIR) # [N_rand*4096, DIM_DIR] 
+                            target_s = target_s.view(-1, DIM_RGB) # [N_rand*4096, DIM_RGB]
+                        
+                        if args.model_name in ['nerf_v4']: # in nerf_v4, load two rays each time
+                            rays_d, rays_d2 = rays_d[:, :3], rays_d[:, 3:6] # [N_rand*4096, 3]
+                            target_s, target_s2 = target_s[:, :3], target_s[:, 3:6] # [N_rand*4096, 3]
                     
-                    if args.model_name in ['nerf_v4']: # in nerf_v4, load two rays each time
-                        rays_d, rays_d2 = rays_d[:, :3], rays_d[:, 3:6] # [N_rand*4096, 3]
-                        target_s, target_s2 = target_s[:, :3], target_s[:, 3:6] # [N_rand*4096, 3]
+                    elif args.data_mode in ['images_new']:
+                        rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, crop_size, crop_size, 3]
+                        rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
+                        target_s = target_s.permute(0, 3, 1, 2) # [N_rand, 3, crop_size, crop_size]
+                    
+                    elif args.data_mode in ['16x16patches']:
+                        rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, 16, 16, 3]
+                        bbx1, bby1, bbx2, bby2 = square_rand_bbox(img_h=rays_o.shape[1], img_w=rays_o.shape[2], rand_crop_size=args.rand_crop_size)
+                        rays_o, rays_d, target_s = rays_o[:, bby1:bby2, bbx1:bbx2, :], rays_d[:, bby1:bby2, bbx1:bbx2, :], target_s[:, bby1:bby2, bbx1:bbx2, :]
+                        rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device) # all shapes are: [N_rand, 3, 3, 3]
+
+                    elif args.data_mode in ['16x16patches_v2']:
+                        rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, 16, 16, 3]
+                        rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
+                        target_s = target_s.permute(0, 3, 1, 2) # [N_rand, 3, 16, 16]
+
+                    elif args.data_mode in ['16x16patches_v3']:
+                        rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, 32, 16, 16, 3]
+                        rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
+                        rays_o = rays_o.view(-1, *rays_o.shape[-3:]) # [N_rand*32, 16, 16, 3]
+                        rays_d = rays_d.view(-1, *rays_d.shape[-3:]) # [N_rand*32, 16, 16, 3]
+                        target_s = target_s.view(-1, *target_s.shape[-3:]) # [N_rand*32, 16, 16, 3]
+                        target_s = target_s.permute(0, 3, 1, 2) # [N_rand*32, 3, 16, 16]
+
+                batch_size = rays_o.shape[0]
+                if args.hard_ratio:
+                    if isinstance(args.hard_ratio, list):
+                        n_hard_in = int(args.hard_ratio[0] * batch_size) # the number of hard samples into the hard pool
+                        n_hard_out = int(args.hard_ratio[1] * batch_size) # the number of hard samples out of the hard pool
+                    else:
+                        n_hard_in = int(args.hard_ratio * batch_size)
+                        n_hard_out = n_hard_in
+                    n_hard_in = min(n_hard_in, n_hard_out) # n_hard_in <= n_hard_out
+
+                if hard_pool_full:
+                    rand_ix_out = np.random.permutation(hard_rays.shape[0])[:n_hard_out]
+                    picked_hard_rays = hard_rays[rand_ix_out]
+                    rays_o   = torch.cat([rays_o,   picked_hard_rays[:,  :3]], dim=0)
+                    rays_d   = torch.cat([rays_d,   picked_hard_rays[:, 3:6]], dim=0)
+                    target_s = torch.cat([target_s, picked_hard_rays[:, 6: ]], dim=0)
                 
-                elif args.data_mode in ['images_new']:
-                    rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, crop_size, crop_size, 3]
-                    rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
-                    target_s = target_s.permute(0, 3, 1, 2) # [N_rand, 3, crop_size, crop_size]
-                
-                elif args.data_mode in ['16x16patches']:
-                    rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, 16, 16, 3]
-                    bbx1, bby1, bbx2, bby2 = square_rand_bbox(img_h=rays_o.shape[1], img_w=rays_o.shape[2], rand_crop_size=args.rand_crop_size)
-                    rays_o, rays_d, target_s = rays_o[:, bby1:bby2, bbx1:bbx2, :], rays_d[:, bby1:bby2, bbx1:bbx2, :], target_s[:, bby1:bby2, bbx1:bbx2, :]
-                    rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device) # all shapes are: [N_rand, 3, 3, 3]
+            # update data time
+            data_time.update(time.time() - t0)
 
-                elif args.data_mode in ['16x16patches_v2']:
-                    rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, 16, 16, 3]
-                    rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
-                    target_s = target_s.permute(0, 3, 1, 2) # [N_rand, 3, 16, 16]
+            # forward and get loss
+            if args.model_name == 'nerf':
+                rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
+                                                        verbose=i < 10, retraw=True,
+                                                        **render_kwargs_train)
+                if 'rgb0' in extras:
+                    loss += img2mse(extras['rgb0'], target_s)
 
-                elif args.data_mode in ['16x16patches_v3']:
-                    rays_o, rays_d, target_s = trainloader.next() # all shapes are: [N_rand, 32, 16, 16, 3]
-                    rays_o, rays_d, target_s = rays_o.to(device), rays_d.to(device), target_s.to(device)
-                    rays_o = rays_o.view(-1, *rays_o.shape[-3:]) # [N_rand*32, 16, 16, 3]
-                    rays_d = rays_d.view(-1, *rays_d.shape[-3:]) # [N_rand*32, 16, 16, 3]
-                    target_s = target_s.view(-1, *target_s.shape[-3:]) # [N_rand*32, 16, 16, 3]
-                    target_s = target_s.permute(0, 3, 1, 2) # [N_rand*32, 3, 16, 16]
-
-            batch_size = rays_o.shape[0]
-            if args.hard_ratio:
-                if isinstance(args.hard_ratio, list):
-                    n_hard_in = int(args.hard_ratio[0] * batch_size) # the number of hard samples into the hard pool
-                    n_hard_out = int(args.hard_ratio[1] * batch_size) # the number of hard samples out of the hard pool
+            elif args.model_name in ['nerf_v2']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                if args.directly_predict_rgb:
+                    rgb, *_ = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
                 else:
-                    n_hard_in = int(args.hard_ratio * batch_size)
-                    n_hard_out = n_hard_in
-                n_hard_in = min(n_hard_in, n_hard_out) # n_hard_in <= n_hard_out
-
-            if hard_pool_full:
-                rand_ix_out = np.random.permutation(hard_rays.shape[0])[:n_hard_out]
-                picked_hard_rays = hard_rays[rand_ix_out]
-                rays_o   = torch.cat([rays_o,   picked_hard_rays[:,  :3]], dim=0)
-                rays_d   = torch.cat([rays_d,   picked_hard_rays[:, 3:6]], dim=0)
-                target_s = torch.cat([target_s, picked_hard_rays[:, 6: ]], dim=0)
+                    rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
             
-        # update data time
-        data_time.update(time.time() - t0)
-
-        # forward and get loss
-        loss = 0
-        if args.model_name == 'nerf':
-            rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
-                                                    verbose=i < 10, retraw=True,
-                                                    **render_kwargs_train)
-            if 'rgb0' in extras:
-                loss += img2mse(extras['rgb0'], target_s)
-
-        elif args.model_name in ['nerf_v2']:
-            model = render_kwargs_train['network_fn']
-            perturb = render_kwargs_train['perturb']
-            if args.directly_predict_rgb:
+            elif args.model_name in ['nerf_v3']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
                 rgb, *_ = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
-            else:
-                rgb, *_, raw, pts, viewdirs = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
-        
-        elif args.model_name in ['nerf_v3']:
-            model = render_kwargs_train['network_fn']
-            perturb = render_kwargs_train['perturb']
-            rgb, *_ = model(rays_o, rays_d, global_step=global_step, perturb=perturb)
-        
-        elif args.model_name in ['nerf_v3.2']:
-            model = render_kwargs_train['network_fn']
-            perturb = render_kwargs_train['perturb']
-            pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
-            rgb = model(positional_embedder(pts))
-
-        elif args.model_name in ['nerf_v3.3']:
-            model = render_kwargs_train['network_fn']
-            perturb = render_kwargs_train['perturb']
-            pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
-            rgb = model.forward_mlp(positional_embedder(pts))
-        
-        elif args.model_name in ['nerf_v3.4']:
-            model = render_kwargs_train['network_fn']
-            perturb = render_kwargs_train['perturb']
-            pts = point_sampler.sample_train2(rays_o, rays_d, perturb=perturb)
-            pts = positional_embedder.embed(pts) # [n_img, patch_h, patch_w, n_sample, 3, 2L+1]
-            rgb = model(pts.view(pts.shape[0], -1))
-            rgb = rgb.view(*pts.shape[:3], 3) # [n_img, patch_h, patch_w, 3]
-
-        elif args.model_name in ['nerf_v3.4.2', 'nerf_v3.6', 'nerf_v3.7']:
-            model = render_kwargs_train['network_fn']
-            perturb = render_kwargs_train['perturb']
-            rays_o = rays_o.repeat(1, args.scale**2) # [n_ray, 3] -> [n_ray, 27], to match the shape of rays_d, rays_rgb
-            pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb) # [n_ray, n_sample * DIM_DIR]
-            pts = positional_embedder(pts)
-            rgb = model(pts) # [n_ray, 3 * scale ** 2]
-
-        elif args.model_name in ['nerf_v3.8']:
-            model = render_kwargs_train['network_fn']
-            perturb = render_kwargs_train['perturb']
-            pts = point_sampler.sample_train_cnnstyle(rays_o, rays_d, perturb=perturb) # [n_img, patch_h, patch_w, n_sample, 3]
-            pts = positional_embedder.embed_cnnstyle(pts) # [n_img, patch_h, patch_w, n_sample, 3, 2L+1]
-            pts = pts.view(*pts.shape[:3], -1) # [n_img, patch_h, patch_w, n_sample*3*2L+1]
-            pts = pts.permute(0, 3, 1, 2) # [n_img, n_sample*3*2L+1, patch_h, patch_w]
-            rgb = model(pts) # [n_img, 3, patch_h, patch_w]
-
-        elif args.model_name in ['nerf_v3.5']:
-            model = render_kwargs_train['network_fn']
-            perturb = render_kwargs_train['perturb']
-            if args.rand_crop_size > 0:
-                img_h = img_w = args.rand_crop_size
-            else:
-                img_h, img_w = IMG_H, IMG_W
-            pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
-            rgb = model.forward_mlp2(positional_embedder(pts), img_h=img_h, img_w=img_w)
-
-        elif args.model_name in ['nerf_v4']:
-            model = render_kwargs_train['network_fn']
-            perturb = render_kwargs_train['perturb']
-            rgb, rgb2 = model(rays_o, rays_d, rays_d2, scale=args.forward_scale, perturb=perturb)
-        
-        elif args.model_name in ['nerf_v6', 'nerf_v6_enhance']:
-            model = render_kwargs_train['network_fn']
-            perturb = render_kwargs_train['perturb']
-            shape = rays_o.shape # [N_rand, crop_size, crop_size, 3]
-            pts = point_sampler.sample_train(rays_o.view(-1, 3), rays_d.view(-1, 3), perturb=perturb)
-            pts = positional_embedder(pts) # [N_rand*crop_size*crop_size, embed_dim]
-            pts = pts.view(shape[0], shape[1], shape[2], -1) # [N_rand, crop_size, crop_size, embed_dim]
-            pts = pts.permute(0, 3, 1, 2) # [N_rand, embed_dim, crop_size, crop_size]
-            rgb, rgb1 = model(pts) # [N_rand, 3, crop_size, crop_size]
             
-            loss_rgb1 = img2mse(rgb1, target_s) * args.lw_rgb1
-            psnr1 = mse2psnr(loss_rgb1)
-            hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
-            loss_line.update('hist_psnr1', hist_psnr1, '.4f')
-            loss += loss_rgb1
+            elif args.model_name in ['nerf_v3.2']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
+                rgb = model(positional_embedder(pts))
 
+            elif args.model_name in ['nerf_v3.3']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
+                rgb = model.forward_mlp(positional_embedder(pts))
+            
+            elif args.model_name in ['nerf_v3.4']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                pts = point_sampler.sample_train2(rays_o, rays_d, perturb=perturb)
+                pts = positional_embedder.embed(pts) # [n_img, patch_h, patch_w, n_sample, 3, 2L+1]
+                rgb = model(pts.view(pts.shape[0], -1))
+                rgb = rgb.view(*pts.shape[:3], 3) # [n_img, patch_h, patch_w, 3]
 
-        
-        # rgb loss
-        loss_rgb = img2mse(rgb, target_s) * args.lw_rgb
-        psnr = mse2psnr(loss_rgb)
-        loss_line.update('psnr', psnr.item(), '.4f')
-        if not (args.enhance_cnn and args.freeze_pretrained):
-            loss += loss_rgb
-        
-        if args.model_name in ['nerf_v4']:
-            loss_rgb2 = img2mse(rgb2, target_s2)
-            psnr2 = mse2psnr(loss_rgb2)
-            loss_line.update('psnr2', psnr2.item(), '.4f')
-            loss += loss_rgb2
+            elif args.model_name in ['nerf_v3.4.2', 'nerf_v3.6', 'nerf_v3.7']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                rays_o = rays_o.repeat(1, args.scale**2) # [n_ray, 3] -> [n_ray, 27], to match the shape of rays_d, rays_rgb
+                pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb) # [n_ray, n_sample * DIM_DIR]
+                pts = positional_embedder(pts)
+                rgb = model(pts) # [n_ray, 3 * scale ** 2]
 
-        # enhance cnn rgb loss
-        if args.enhance_cnn:
-            model_enhance = render_kwargs_train['network_enhance']
-            rgb1 = model_enhance(rgb)
-            loss_rgb1 = img2mse(rgb1, target_s)
-            psnr1 = mse2psnr(loss_rgb1)
-            loss_line.update('psnr1', psnr1.item(), '.4f')
-            loss += loss_rgb1
+            elif args.model_name in ['nerf_v3.8']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                pts = point_sampler.sample_train_cnnstyle(rays_o, rays_d, perturb=perturb) # [n_img, patch_h, patch_w, n_sample, 3]
+                pts = positional_embedder.embed_cnnstyle(pts) # [n_img, patch_h, patch_w, n_sample, 3, 2L+1]
+                pts = pts.view(*pts.shape[:3], -1) # [n_img, patch_h, patch_w, n_sample*3*2L+1]
+                pts = pts.permute(0, 3, 1, 2) # [n_img, n_sample*3*2L+1, patch_h, patch_w]
+                rgb = model(pts) # [n_img, 3, patch_h, patch_w]
+
+            elif args.model_name in ['nerf_v3.5']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                if args.rand_crop_size > 0:
+                    img_h = img_w = args.rand_crop_size
+                else:
+                    img_h, img_w = IMG_H, IMG_W
+                pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
+                rgb = model.forward_mlp2(positional_embedder(pts), img_h=img_h, img_w=img_w)
+
+            elif args.model_name in ['nerf_v4']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                rgb, rgb2 = model(rays_o, rays_d, rays_d2, scale=args.forward_scale, perturb=perturb)
+            
+            elif args.model_name in ['nerf_v6', 'nerf_v6_enhance']:
+                model = render_kwargs_train['network_fn']
+                perturb = render_kwargs_train['perturb']
+                shape = rays_o.shape # [N_rand, crop_size, crop_size, 3]
+                pts = point_sampler.sample_train(rays_o.view(-1, 3), rays_d.view(-1, 3), perturb=perturb)
+                pts = positional_embedder(pts) # [N_rand*crop_size*crop_size, embed_dim]
+                pts = pts.view(shape[0], shape[1], shape[2], -1) # [N_rand, crop_size, crop_size, embed_dim]
+                pts = pts.permute(0, 3, 1, 2) # [N_rand, embed_dim, crop_size, crop_size]
+                rgb, rgb1 = model(pts) # [N_rand, 3, crop_size, crop_size]
+                
+                loss_rgb1 = img2mse(rgb1, target_s) * args.lw_rgb1
+                psnr1 = mse2psnr(loss_rgb1)
+                hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
+                loss_line.update('hist_psnr1', hist_psnr1, '.4f')
+                loss += loss_rgb1
+
+            # rgb loss
+            loss_rgb = img2mse(rgb, target_s) * args.lw_rgb
+            psnr = mse2psnr(loss_rgb)
+            loss_line.update('psnr', psnr.item(), '.4f')
+            if not (args.enhance_cnn and args.freeze_pretrained):
+                loss += loss_rgb
+            
+            if args.model_name in ['nerf_v4']:
+                loss_rgb2 = img2mse(rgb2, target_s2)
+                psnr2 = mse2psnr(loss_rgb2)
+                loss_line.update('psnr2', psnr2.item(), '.4f')
+                loss += loss_rgb2
+
+            # enhance cnn rgb loss
+            if args.enhance_cnn:
+                model_enhance = render_kwargs_train['network_enhance']
+                rgb1 = model_enhance(rgb)
+                loss_rgb1 = img2mse(rgb1, target_s)
+                psnr1 = mse2psnr(loss_rgb1)
+                loss_line.update('psnr1', psnr1.item(), '.4f')
+                loss += loss_rgb1
+            
+            # smoothing for log print
+            if not math.isinf(psnr.item()):
+                hist_psnr = psnr.item() if i == start + 1 else hist_psnr * 0.95 + psnr.item() * 0.05
+                loss_line.update('hist_psnr', hist_psnr, '.4f')
+            if args.model_name in ['nerf_v4'] and not math.isinf(psnr2.item()):
+                hist_psnr2 = psnr2.item() if i == start + 1 else hist_psnr2 * 0.95 + psnr2.item() * 0.05
+                loss_line.update('hist_psnr2', hist_psnr2, '.4f')
+            if args.enhance_cnn:
+                hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
+                loss_line.update('hist_psnr1', hist_psnr1, '.4f')
         
+        # <<<<<<<<<<< inner loop (get data, forward, add loss) ends <<<<<<<<<<<
+
         # backward and update
         optimizer.zero_grad()
         loss.backward()
@@ -1568,24 +1580,13 @@ def train():
                 if hard_rays.shape[0] >= batch_size * args.hard_mul:
                     hard_pool_full = True
 
-        # smoothing for log print
-        if not math.isinf(psnr.item()):
-            hist_psnr = psnr.item() if i == start + 1 else hist_psnr * 0.95 + psnr.item() * 0.05
-            loss_line.update('hist_psnr', hist_psnr, '.4f')
-        if args.model_name in ['nerf_v4'] and not math.isinf(psnr2.item()):
-            hist_psnr2 = psnr2.item() if i == start + 1 else hist_psnr2 * 0.95 + psnr2.item() * 0.05
-            loss_line.update('hist_psnr2', hist_psnr2, '.4f')
-        if args.enhance_cnn:
-            hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
-            loss_line.update('hist_psnr1', hist_psnr1, '.4f')
-
         # print logs of training
         if i % args.i_print == 0:
             logstr = f"[TRAIN] Iter {i} data_time {data_time.val:.4f} ({data_time.avg:.4f}) batch_time {batch_time.val:.4f} ({batch_time.avg:.4f}) " + loss_line.format()
             print(logstr)
 
             # save image for check
-            if 'rgb1' in locals() and i % (100 * args.i_print) == 0:
+            if rgb1 is not None and i % (100 * args.i_print) == 0:
                 img = rgb1.reshape([patch_h, patch_w, 3])
                 save_path = f'{logger.gen_img_path}/rgb1_{ExpID}_iter{i}.png'
                 imageio.imwrite(save_path, to8b(img))
@@ -1647,7 +1648,6 @@ def train():
                 to_save['network_enhance_state_dict'] = render_kwargs_train['network_enhance'].state_dict()
             torch.save(to_save, path)
             save_log = f'Iter {i} Save checkpoint: "{path}"'
-            
             # # convert to onnx
             # onnx_path = path.replace('.tar', '.onnx')
             # save_onnx(model, onnx_path)
