@@ -1513,7 +1513,8 @@ def train():
             
             loss_rgb1 = img2mse(rgb1, target_s)
             psnr1 = mse2psnr(loss_rgb1)
-            loss_line.update('psnr1', psnr1.item(), '.4f')
+            hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
+            loss_line.update('hist_psnr1', hist_psnr1, '.4f')
             loss += loss_rgb1
 
 
