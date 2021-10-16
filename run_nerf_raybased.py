@@ -645,7 +645,7 @@ def create_nerf(args, near, far):
     #     n_flops = get_n_flops_(model, input=dummy_input, count_adds=False) / (n_img * H * W)
 
     elif args.model_name in ['nerf_v3.3', 'nerf_v6', 'nerf_v6_enhance']:
-        n_img, H, W = 1, 400, 400
+        n_img, H, W = 1, 16, 16
         dummy_input = torch.randn(n_img, model.input_dim, H, W).to(device) # CNN-style input
         torch.cuda.synchronize()
         t0 = time.time()
