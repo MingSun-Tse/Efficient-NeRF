@@ -645,7 +645,7 @@ def create_nerf(args, near, far):
     #     n_flops = get_n_flops_(model, input=dummy_input, count_adds=False) / (n_img * H * W)
 
     elif args.model_name in ['nerf_v3.3', 'nerf_v6', 'nerf_v6_enhance']:
-        n_img, H, W = 1, 16, 16
+        n_img, H, W = 1, 400, 400
         dummy_input = torch.randn(n_img, model.input_dim, H, W).to(device) # CNN-style input
         torch.cuda.synchronize()
         t0 = time.time()
@@ -1587,9 +1587,10 @@ def train():
 
             # save image for check
             if rgb1 is not None and i % (100 * args.i_print) == 0:
-                img = rgb1.reshape([patch_h, patch_w, 3])
-                save_path = f'{logger.gen_img_path}/rgb1_{ExpID}_iter{i}.png'
-                imageio.imwrite(save_path, to8b(img))
+                for ix in range(min(5, rgb1.shape[0])): # save 5 images at most
+                    img = rgb1[ix].permute(1, 2, 0) # to shape [h, w, 3]
+                    save_path = f'{logger.gen_img_path}/rgb1_{ExpID}_iter{i}_img{ix}.png'
+                    imageio.imwrite(save_path, to8b(img))
 
         # check gradients to make sure group_l2 works normally
         if args.group_l2 and i % (args.i_print * 10) == 0:
