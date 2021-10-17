@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import torch.utils.benchmark as benchmark
 # from torch.utils.tensorboard import SummaryWriter
 from model.nerf_raybased import NeRF, NeRF_v2, NeRF_v3, NeRF_v3_2, NeRF_v3_3, NeRF_v3_4, NeRF_v3_5, NeRF_v3_6, NeRF_v3_7, NeRF_v4, NeRF_v6
-from model.nerf_raybased import NeRF_v3_8, NeRF_v6_enhance
+from model.nerf_raybased import NeRF_v3_8, NeRF_v6_enhance, NeRF_v7
 from model.nerf_raybased import PositionalEmbedder, PointSampler
 from model.enhance_cnn import EDSR
 from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder
@@ -327,16 +327,16 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                     rgb = model(rays_o, rays_d, rays_d2=None, scale=args.forward_scale, perturb=perturb, test=True)
                 rgb = torch.reshape(rgb, (H, W, 3))
             
-            elif args.model_name in ['nerf_v6', 'nerf_v6_enhance']:
+            elif args.model_name in ['nerf_v6', 'nerf_v6_enhance', 'nerf_v7']:
                 model_input = positional_embedder(point_sampler.sample_test(c2w)) # [n_ray, embed_dim]
                 model_input = model_input.view(1, H, W, model_input.shape[-1])
                 model_input = model_input.permute(0, 3, 1, 2)
                 # model_input = model_input.view(1, model_input.shape[-1], H, W) # Note! mind the meaning of each axis
                 with torch.no_grad():
                     out = model(model_input)
-                    if args.model_name == 'nerf_v6':
+                    if args.model_name in ['nerf_v6', 'nerf_v7']:
                         rgb = out
-                    elif args.model_name == 'nerf_v6_enhance':
+                    elif args.model_name in ['nerf_v6_enhance']:
                         rgb = out[1] # [1, 3, H, W]
                     rgb = rgb.permute(0, 2, 3, 1) # [1, H, W, 3]
 
@@ -503,6 +503,12 @@ def create_nerf(args, near, far):
         if not args.freeze_pretrained:
             grad_vars += list(model.parameters())
     
+    elif args.model_name in ['nerf_v7']:
+        input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
+        model = NeRF_v7(args, input_dim).to(device)
+        if not args.freeze_pretrained:
+            grad_vars += list(model.parameters())
+
     # freeze pretrained model
     if args.freeze_pretrained:
         assert args.pretrained_ckpt
@@ -648,7 +654,7 @@ def create_nerf(args, near, far):
     #     dummy_input = torch.randn(n_img, model.input_dim, H, W).to(device) # CNN-style input
     #     n_flops = get_n_flops_(model, input=dummy_input, count_adds=False) / (n_img * H * W)
 
-    elif args.model_name in ['nerf_v3.3', 'nerf_v6', 'nerf_v6_enhance']:
+    elif args.model_name in ['nerf_v3.3', 'nerf_v6', 'nerf_v6_enhance', 'nerf_v7']:
         n_img, H, W = 1, 400, 400
         dummy_input = torch.randn(n_img, model.input_dim, H, W).to(device) # CNN-style input
         torch.cuda.synchronize()
@@ -1506,7 +1512,7 @@ def train():
                 perturb = render_kwargs_train['perturb']
                 rgb, rgb2 = model(rays_o, rays_d, rays_d2, scale=args.forward_scale, perturb=perturb)
             
-            elif args.model_name in ['nerf_v6', 'nerf_v6_enhance']:
+            elif args.model_name in ['nerf_v6', 'nerf_v6_enhance', 'nerf_v7']:
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
                 shape = rays_o.shape # [N_rand, crop_size, crop_size, 3]
@@ -1521,7 +1527,7 @@ def train():
                     hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
                     loss_line.update('hist_psnr1', hist_psnr1, '.4f')
                     loss += loss_rgb1
-                elif args.model_name in ['nerf_v6']:
+                elif args.model_name in ['nerf_v6', 'nerf_v7']:
                     rgb = model(pts)
 
             # rgb loss

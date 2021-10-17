@@ -1117,7 +1117,7 @@ class NeRF_v6_enhance(nn.Module):
 
 
 class NeRF_v3_8(nn.Module):
-    '''U-Net style. Use conv for all layers'''
+    '''UNet style. Use conv for all layers'''
     def __init__(self, args, input_dim):
         super(NeRF_v3_8, self).__init__()
         self.args = args
@@ -1163,3 +1163,15 @@ class NeRF_v3_8(nn.Module):
         x = self.head(x)
         x = self.body(x) + x if self.args.use_residual else self.body(x)
         return self.tail(x) # [n_img, 3, H, W]
+
+class NeRF_v7(nn.Module):
+    '''Standard UNet style.'''
+    def __init__(self, args, input_dim):
+        super(NeRF_v7, self).__init__()
+        self.args = args
+        self.input_dim = input_dim
+        from .unet import UNet
+        self.net = UNet(n_channels=input_dim, n_classes=3, bilinear=True)
+        
+    def forward(self, x): # x: [n_img, embed_dim, H, W]
+        return self.net(x) # [n_img, 3, H, W]

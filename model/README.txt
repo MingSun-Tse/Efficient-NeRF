@@ -19,4 +19,7 @@ model evolution path:
 Data evolution path:
 * data v7: This is the 1st working scheme: store rays in .npy instead of storing images
 * data v8: 10k images vs. 5k in v7
-* 
+
+
+
+`unet` folder refers to the PyTorch UNet implementation at: https://github.com/milesial/Pytorch-UNet
