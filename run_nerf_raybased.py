@@ -333,7 +333,11 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 model_input = model_input.permute(0, 3, 1, 2)
                 # model_input = model_input.view(1, model_input.shape[-1], H, W) # Note! mind the meaning of each axis
                 with torch.no_grad():
-                    rgb = model(model_input)[1] # [1, 3, H, W]
+                    out = model(model_input)
+                    if args.model_name == 'nerf_v6':
+                        rgb = out
+                    elif args.model_name == 'nerf_v6_enhance':
+                        rgb = out[1] # [1, 3, H, W]
                     rgb = rgb.permute(0, 2, 3, 1) # [1, H, W, 3]
 
             # enhance
@@ -1510,13 +1514,15 @@ def train():
                 pts = positional_embedder(pts) # [N_rand*crop_size*crop_size, embed_dim]
                 pts = pts.view(shape[0], shape[1], shape[2], -1) # [N_rand, crop_size, crop_size, embed_dim]
                 pts = pts.permute(0, 3, 1, 2) # [N_rand, embed_dim, crop_size, crop_size]
-                rgb, rgb1 = model(pts) # [N_rand, 3, crop_size, crop_size]
-                
-                loss_rgb1 = img2mse(rgb1, target_s) * args.lw_rgb1
-                psnr1 = mse2psnr(loss_rgb1)
-                hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
-                loss_line.update('hist_psnr1', hist_psnr1, '.4f')
-                loss += loss_rgb1
+                if args.model_name in ['nerf_v6_enhance']:
+                    rgb, rgb1 = model(pts) # [N_rand, 3, crop_size, crop_size]
+                    loss_rgb1 = img2mse(rgb1, target_s) * args.lw_rgb1
+                    psnr1 = mse2psnr(loss_rgb1)
+                    hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
+                    loss_line.update('hist_psnr1', hist_psnr1, '.4f')
+                    loss += loss_rgb1
+                elif args.model_name in ['nerf_v6']:
+                    rgb = model(pts)
 
             # rgb loss
             loss_rgb = img2mse(rgb, target_s) * args.lw_rgb
