@@ -333,7 +333,11 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 model_input = model_input.permute(0, 3, 1, 2)
                 # model_input = model_input.view(1, model_input.shape[-1], H, W) # Note! mind the meaning of each axis
                 with torch.no_grad():
-                    rgb = model(model_input)[1] # [1, 3, H, W]
+                    out = model(model_input)
+                    if args.model_name == 'nerf_v6':
+                        rgb = out
+                    elif args.model_name == 'nerf_v6_enhance':
+                        rgb = out[1] # [1, 3, H, W]
                     rgb = rgb.permute(0, 2, 3, 1) # [1, H, W, 3]
 
             # enhance
