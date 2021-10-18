@@ -71,10 +71,18 @@ class Up(nn.Module):
 
 
 class OutConv(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, act=None):
         super(OutConv, self).__init__()
         in_channels, out_channels = int(in_channels), int(out_channels)
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
-
+        self.act = None
+        if act == 'sigmoid':
+            self.act = nn.Sigmoid()
+        elif act == 'relu':
+            self.act = nn.ReLU(inplace=True)
     def forward(self, x):
-        return self.conv(x)
+        if self.act is not None:
+            x = self.act(self.conv(x))
+        else:
+            x = self.conv(x)
+        return x

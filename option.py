@@ -225,8 +225,7 @@ parser.add_argument('--iter_size', type=int, default=1)
 parser.add_argument('--unet.ON', action='store_true')
 parser.add_argument('--unet.base_n_filters', type=int, default=64)
 parser.add_argument('--unet.n_downsample', type=int, default=4)
-
-
+parser.add_argument('--unet.last_act', type=str, default='linear', choices=['linear', 'sigmoid', 'relu'])
 args = parser.parse_args()
 
 if args.video_tag == '':

@@ -78,7 +78,7 @@ class UNet(nn.Module):
             nf //= 2
 
         self.body = nn.Sequential(*body)
-        self.outc = OutConv(nf, n_classes)
+        self.outc = OutConv(nf, n_classes, act=args.unet.last_act)
 
     def forward(self, x):
         x = self.inc(x)
