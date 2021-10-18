@@ -183,3 +183,12 @@ CUDA_VISIBLE_DEVICES=0,1 python run_nerf_raybased.py --model_name nerf_v6 --conf
 
 ## nerf_v6_enhance + Data v13
 CUDA_VISIBLE_DEVICES=0,1 python run_nerf_raybased.py --model_name nerf_v6_enhance --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 11 --enhance_n_resblock 10 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v13_16x16patchesv3_10kimages_splitsize32 --data_mode 16x16patches_v3 --n_pose_video 50,4,1 --N_iters 1200000 --N_rand 64 --use_residual --project nerfv6enhance__lego__S16W256D11ERB10_DPRGB_Res_NoDir__Datav13_BS2048*16*16 --cache_ignore data --screen --num_workers 12 --i_update_data 10000 --debug --i_video 10 --i_weights 10 --N_rand 16
+
+## nerf_v7 + Data v13
+CUDA_VISIBLE_DEVICES=1,2,3,0 python run_nerf_raybased.py --model_name nerf_v7 --config configs/lego_noview.txt --n_sample_per_ray 16 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v13_16x16patchesv3_10kimages_splitsize32 --data_mode 16x16patches_v3 --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 96 --project nerfv7__lego__S16_DPRGB_NoDir__Datav13_BS3072*16*16 --cache_ignore data --screen --num_workers 12
+
+## nerf_v7 + Data v10 (400*400)
+CUDA_VISIBLE_DEVICES=1,0 python run_nerf_raybased.py --model_name nerf_v7 --config configs/lego_noview.txt --n_sample_per_ray 16 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v10_RandOriginsDirs_10kImages --data_mode images_new --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 3 --project nerfv7__lego__S16_DPRGB_NoDir__Datav13_BS3*400*400 --cache_ignore data --screen --num_workers 12
+
+## nerf_v7 + Data v13 (downsample=2)
+CUDA_VISIBLE_DEVICES=1,2,3,0 python run_nerf_raybased.py --model_name nerf_v7 --unet.ON --unet.n_downsample 2 --config configs/lego_noview.txt --n_sample_per_ray 16 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v13_16x16patchesv3_10kimages_splitsize32 --data_mode 16x16patches_v3 --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 96 --project nerfv7__lego__S16_DPRGB_NoDir_Down2__Datav13_BS3072*16*16 --cache_ignore data --screen --num_workers 12
