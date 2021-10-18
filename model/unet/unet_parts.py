@@ -10,6 +10,7 @@ class DoubleConv(nn.Module):
 
     def __init__(self, in_channels, out_channels, mid_channels=None):
         super().__init__()
+        in_channels, out_channels = int(in_channels), int(out_channels)
         if not mid_channels:
             mid_channels = out_channels
         self.double_conv = nn.Sequential(
@@ -30,6 +31,7 @@ class Down(nn.Module):
 
     def __init__(self, in_channels, out_channels):
         super().__init__()
+        in_channels, out_channels = int(in_channels), int(out_channels)
         self.maxpool_conv = nn.Sequential(
             nn.MaxPool2d(2),
             DoubleConv(in_channels, out_channels)
@@ -44,7 +46,7 @@ class Up(nn.Module):
 
     def __init__(self, in_channels, out_channels, bilinear=True):
         super().__init__()
-
+        in_channels, out_channels = int(in_channels), int(out_channels)
         # if bilinear, use the normal convolutions to reduce the number of channels
         if bilinear:
             self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
@@ -71,6 +73,7 @@ class Up(nn.Module):
 class OutConv(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(OutConv, self).__init__()
+        in_channels, out_channels = int(in_channels), int(out_channels)
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
 
     def forward(self, x):
