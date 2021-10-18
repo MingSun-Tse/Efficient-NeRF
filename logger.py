@@ -15,6 +15,16 @@ pjoin = os.path.join
 # globals
 CONFIDENTIAL_SERVERS = ['202', '008']
 
+class DoubleWriter():
+    def __init__(self, f1, f2):
+        self.f1, self.f2 = f1, f2
+    def write(self, msg):
+        self.f1.write(msg)
+        self.f2.write(msg)
+    def flush(self):
+        self.f1.flush()
+        self.f2.flush()
+
 class LogPrinter(object):
     def __init__(self, file, ExpID, print_to_screen=False):
         self.file = file
@@ -276,6 +286,7 @@ class Logger(object):
         mkdirs(self.weights_path, self.gen_img_path, self.logplt_path, self.cache_path)
         self.logtxt = open(self.logtxt_path, "a+")
         self.script_hist = open('.script_history', 'a+') # save local script history, for convenience of check
+        sys.stderr = DoubleWriter(sys.stderr, self.logtxt) # print to stderr, meanwhile, also print to logtxt
 
     def print_script(self):
         script = 'cd %s\n' % os.path.abspath(os.getcwd())
@@ -389,8 +400,8 @@ class Logger(object):
         os.remove(local_f)
     
     def save_args(self, args):
-        with open(pjoin(self.log_path, 'params.json'), 'w') as f:
-            json.dump(args.__dict__, f, indent=4)
+        # with open(pjoin(self.log_path, 'params.json'), 'w') as f:
+        #     json.dump(args.__dict__, f, indent=4)
         with open(pjoin(self.log_path, 'params.yaml'), 'w') as f:
             yaml.dump(args.__dict__, f, indent=4)
     

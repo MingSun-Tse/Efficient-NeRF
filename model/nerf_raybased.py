@@ -1171,7 +1171,7 @@ class NeRF_v7(nn.Module):
         self.args = args
         self.input_dim = input_dim
         from .unet import UNet
-        self.net = UNet(n_channels=input_dim, n_classes=3, bilinear=True)
+        self.net = UNet(args, n_channels=input_dim, n_classes=3, bilinear=True)
         
     def forward(self, x): # x: [n_img, embed_dim, H, W]
         return self.net(x) # [n_img, 3, H, W]

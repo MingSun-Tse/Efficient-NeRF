@@ -1056,14 +1056,23 @@ def to_tensor(x):
     return x
 
 def denormalize_image(x, mean, std):
-    '''x shape: [N, C, H, W], batch image
-    '''
+    '''x shape: [N, C, H, W], batch image'''
     x = x.cuda()
     mean = to_tensor(mean).cuda()
     std = to_tensor(std).cuda()
     mean = mean.unsqueeze(0).unsqueeze(2).unsqueeze(3) # shape: [1, C, 1, 1]
     std = std.unsqueeze(0).unsqueeze(2).unsqueeze(3)
     x = std * x + mean
+    return x
+
+def normalize_image(x, mean, std):
+    '''x shape: [N, C, H, W], batch image'''
+    x = x.cuda()
+    mean = to_tensor(mean).cuda()
+    std = to_tensor(std).cuda()
+    mean = mean.unsqueeze(0).unsqueeze(2).unsqueeze(3) # shape: [1, C, 1, 1]
+    std = std.unsqueeze(0).unsqueeze(2).unsqueeze(3)
+    x = (x - mean) / std
     return x
 
 def make_one_hot(labels, C): # labels: [N]
@@ -1151,3 +1160,23 @@ class LossLine():
             item = f"{k} {v:{self.formats[k]}}"
             out.append(item)
         return sep.join(out)
+
+def update_args(args):
+    '''Update arguments of configargparse'''
+    class EmptyClass(): pass
+    arg_dict = copy.deepcopy(args.__dict__)
+    for k, v in arg_dict.items():
+        if '.' in k: # @mst-TODO: hardcode pattern, may be risky
+            module, arg = k.split('.') # e.g., "deepmixup.depth"
+            if arg_dict[f'{module}.ON']:  # this module is being used
+                if not hasattr(args, module): args.__setattr__(module, EmptyClass()) # set to a blank class
+                args.__dict__[module].__dict__[arg] = v # args.'deepmixup.depth' = 10 --> args.deepmixup.depth = 10
+            args.__delattr__(k)
+    return args
+
+def check_kernel_spatial_dist(model):
+    for name, module in model.named_modules():
+        if isinstance(module, (nn.Conv2d)):
+            spatial = module.weight.data.abs().mean(dim=(0,1))
+            print(f'{name} kernel spatial dist:')
+            print(spatial.data.cpu().numpy())

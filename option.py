@@ -220,6 +220,13 @@ parser.add_argument('--enhance_separate_train', action='store_true')
 parser.add_argument('--lw_rgb', type=float, default=1)
 parser.add_argument('--lw_rgb1', type=float, default=1)
 parser.add_argument('--iter_size', type=int, default=1)
+
+# unet related
+parser.add_argument('--unet.ON', action='store_true')
+parser.add_argument('--unet.base_n_filters', type=int, default=64)
+parser.add_argument('--unet.n_downsample', type=int, default=4)
+
+
 args = parser.parse_args()
 
 if args.video_tag == '':
@@ -254,3 +261,7 @@ args.previous_layers = ''
 args.arch = 'mlp'
 args.stage_pr = strdict_to_dict(args.stage_pr, float)
 args.orth_reg_iter = -1
+
+# use Huan's latest args update feature, easier for controlling irrelevant args
+from utils import update_args
+args = update_args(args)
