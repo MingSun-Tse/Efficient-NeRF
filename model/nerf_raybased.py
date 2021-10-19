@@ -548,6 +548,18 @@ class NeRF_v3(nn.Module):
         rgb = self.tail(h)
         return rgb, rgb
 
+class ResMLP(nn.Module):
+    '''Refer to the ResBlock implementation in EDSR'''
+    def __init__(self, width, act=nn.ReLU(True), res_scale=1):
+        super(ResMLP, self).__init__()
+        m = [nn.Linear(width, width), act, nn.Linear(width, width)]
+        self.body = nn.Sequential(*m)
+        self.res_scale = res_scale
+
+    def forward(self, x):
+        res = self.body(x).mul(self.res_scale)
+        return res + x
+
 class NeRF_v3_2(nn.Module):
     '''Based on NeRF_v3, move positional embedding out'''
     def __init__(self, args, input_dim):
@@ -562,14 +574,26 @@ class NeRF_v3_2(nn.Module):
         else:
             Ws = [W] * (D-1) + [3]
 
+        # non-linear activation func
+        if args.act.lower() == 'relu':
+            act = nn.ReLU(inplace=True)
+        elif args.act.lower() == 'lrelu':
+            act = nn.LeakyReLU(inplace=True)
+
         # head
         self.input_dim = input_dim
-        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), nn.ReLU(inplace=True)])
+        self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), act])
         
         # body
-        body = []
-        for i in range(1, D-1):
-            body += [nn.Linear(Ws[i-1], Ws[i]), nn.ReLU(inplace=True)]
+        if hasattr(args, 'trial'):
+            if args.trial.body_arch in ['resmlp']:
+                n_block = (D - 2) // 2 # 2 layers in a ResMLP
+                body = [ResMLP(W, act, args.trial.res_scale) for _ in range(n_block)]
+            
+            elif args.trial.body_arch in ['mlp']:
+                body = []
+                for i in range(1, D-1):
+                    body += [nn.Linear(Ws[i-1], Ws[i]), act]
         self.body = nn.Sequential(*body)
         
         # tail

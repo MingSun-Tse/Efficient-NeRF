@@ -220,12 +220,19 @@ parser.add_argument('--enhance_separate_train', action='store_true')
 parser.add_argument('--lw_rgb', type=float, default=1)
 parser.add_argument('--lw_rgb1', type=float, default=1)
 parser.add_argument('--iter_size', type=int, default=1)
+parser.add_argument('--act', type=str, default='relu', choices=['relu', 'lrelu'])
 
 # unet related
 parser.add_argument('--unet.ON', action='store_true')
 parser.add_argument('--unet.base_n_filters', type=int, default=64)
 parser.add_argument('--unet.n_downsample', type=int, default=4)
 parser.add_argument('--unet.last_act', type=str, default='linear', choices=['linear', 'sigmoid', 'relu'])
+
+# try related
+parser.add_argument('--trial.ON', action='store_true')
+parser.add_argument('--trial.body_arch', type=str, default='mlp', choices=['mlp', 'resmlp'])
+parser.add_argument('--trial.res_scale', type=float, default=1.)
+
 args = parser.parse_args()
 
 if args.video_tag == '':
