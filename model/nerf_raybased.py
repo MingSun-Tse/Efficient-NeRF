@@ -585,15 +585,21 @@ class NeRF_v3_2(nn.Module):
         self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), act])
         
         # body
+        body = []
+        for i in range(1, D-1):
+            body += [nn.Linear(Ws[i-1], Ws[i]), act]
+        
+        # >>> new implementation of the body. Will replace the above 
         if hasattr(args, 'trial'):
             if args.trial.body_arch in ['resmlp']:
                 n_block = (D - 2) // 2 # 2 layers in a ResMLP
                 body = [ResMLP(W, act, args.trial.res_scale) for _ in range(n_block)]
-            
             elif args.trial.body_arch in ['mlp']:
                 body = []
                 for i in range(1, D-1):
                     body += [nn.Linear(Ws[i-1], Ws[i]), act]
+        # <<<
+
         self.body = nn.Sequential(*body)
         
         # tail
