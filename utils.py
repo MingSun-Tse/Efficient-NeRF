@@ -1161,9 +1161,9 @@ class LossLine():
             out.append(item)
         return sep.join(out)
 
+class EmptyClass(): pass
 def update_args(args):
     '''Update arguments of configargparse'''
-    class EmptyClass(): pass
     arg_dict = copy.deepcopy(args.__dict__)
     for k, v in arg_dict.items():
         if '.' in k: # @mst-TODO: hardcode pattern, may be risky
