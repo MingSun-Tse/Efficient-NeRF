@@ -550,9 +550,12 @@ class NeRF_v3(nn.Module):
 
 class ResMLP(nn.Module):
     '''Refer to the ResBlock implementation in EDSR'''
-    def __init__(self, width, act=nn.ReLU(True), res_scale=1):
+    def __init__(self, width, act=nn.ReLU(True), res_scale=1, n_learnable=2):
         super(ResMLP, self).__init__()
-        m = [nn.Linear(width, width), act, nn.Linear(width, width)]
+        m = [nn.Linear(width, width)]
+        for _ in range(n_learnable - 1):
+            if act is not None: m += [act]
+            m += [nn.Linear(width, width)]
         self.body = nn.Sequential(*m)
         self.res_scale = res_scale
 
@@ -579,6 +582,8 @@ class NeRF_v3_2(nn.Module):
             act = nn.ReLU(inplace=True)
         elif args.act.lower() == 'lrelu':
             act = nn.LeakyReLU(inplace=True)
+        elif args.act.lower() == 'none':
+            act = None
 
         # head
         self.input_dim = input_dim
