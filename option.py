@@ -117,6 +117,7 @@ parser.add_argument('--project_name', type=str, default="")
 parser.add_argument('--debug', action="store_true")
 parser.add_argument('--screen_print', action="store_true")
 parser.add_argument('--cache_ignore', type=str, default='')
+parser.add_argument('--note', type=str, default='')
 
 # @mst: related to nerf_v2
 parser.add_argument('--model_name', type=str, default='nerf_v2', 
@@ -235,6 +236,7 @@ parser.add_argument('--trial.res_scale', type=float, default=1.)
 parser.add_argument('--trial.n_learnable', type=int, default=2, help='num of learnable layers')
 parser.add_argument('--trial.inact', default='relu', choices=['none', 'relu', 'lrelu'], help='the within activation func in a block')
 parser.add_argument('--trial.outact', default='none', choices=['none', 'relu', 'lrelu'], help='the output activation func in a block')
+parser.add_argument('--trial.n_block', type=int, default=-1, help='num of block in network body')
 
 
 args = parser.parse_args()
