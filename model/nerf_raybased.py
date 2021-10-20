@@ -549,20 +549,37 @@ class NeRF_v3(nn.Module):
         return rgb, rgb
 
 class ResMLP(nn.Module):
-    '''Refer to the ResBlock implementation in EDSR'''
-    def __init__(self, width, act=nn.ReLU(True), res_scale=1, n_learnable=2):
+    '''Refer to the ResBlock implementation in EDSR.
+    https://github.com/yulunzhang/RCAN/blob/3339ebc59519c3bb2b5719b87dd36515ec7f3ba7/RCAN_TrainCode/code/model/common.py#L37
+    '''
+    def __init__(self, width, inact=nn.ReLU(True), outact=None, res_scale=1, n_learnable=2):
+        '''inact is the activation func within block. outact is the activation func right before output'''
         super(ResMLP, self).__init__()
         m = [nn.Linear(width, width)]
         for _ in range(n_learnable - 1):
-            if act is not None: m += [act]
+            if inact is not None: m += [inact]
             m += [nn.Linear(width, width)]
         self.body = nn.Sequential(*m)
         self.res_scale = res_scale
+        self.outact = outact
 
     def forward(self, x):
-        res = self.body(x).mul(self.res_scale)
-        return res + x
+        x = self.body(x).mul(self.res_scale) + x
+        if self.outact is not None:
+            x = self.outact(x) 
+        return x
 
+def get_activation(act):
+    if act.lower() == 'relu':
+        func = nn.ReLU(inplace=True)
+    elif act.lower() == 'lrelu':
+        func = nn.LeakyReLU(inplace=True)
+    elif act.lower() == 'none':
+        func = None
+    else:
+        raise NotImplementedError
+    return func
+    
 class NeRF_v3_2(nn.Module):
     '''Based on NeRF_v3, move positional embedding out'''
     def __init__(self, args, input_dim):
@@ -577,14 +594,9 @@ class NeRF_v3_2(nn.Module):
         else:
             Ws = [W] * (D-1) + [3]
 
-        # non-linear activation func
-        if args.act.lower() == 'relu':
-            act = nn.ReLU(inplace=True)
-        elif args.act.lower() == 'lrelu':
-            act = nn.LeakyReLU(inplace=True)
-        elif args.act.lower() == 'none':
-            act = None
-
+        # the main non-linear activation func
+        act = get_activation(args.act)
+        
         # head
         self.input_dim = input_dim
         self.head = nn.Sequential(*[nn.Linear(input_dim, Ws[0]), act])
@@ -596,9 +608,12 @@ class NeRF_v3_2(nn.Module):
         
         # >>> new implementation of the body. Will replace the above 
         if hasattr(args, 'trial'):
+            inact = get_activation(args.trial.inact)
+            outact = get_activation(args.trial.outact)
             if args.trial.body_arch in ['resmlp']:
                 n_block = (D - 2) // 2 # 2 layers in a ResMLP
-                body = [ResMLP(W, act, args.trial.res_scale) for _ in range(n_block)]
+                body = [ResMLP(W, inact=inact, outact=outact, res_scale=args.trial.res_scale, n_learnable=args.trial.n_learnable) 
+                    for _ in range(n_block)]
             elif args.trial.body_arch in ['mlp']:
                 body = []
                 for i in range(1, D-1):

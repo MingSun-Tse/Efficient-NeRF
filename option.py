@@ -220,7 +220,7 @@ parser.add_argument('--enhance_separate_train', action='store_true')
 parser.add_argument('--lw_rgb', type=float, default=1)
 parser.add_argument('--lw_rgb1', type=float, default=1)
 parser.add_argument('--iter_size', type=int, default=1)
-parser.add_argument('--act', type=str, default='relu', choices=['relu', 'lrelu', 'none'])
+parser.add_argument('--act', type=str, default='relu', choices=['relu', 'lrelu'], help='main activation func in a network')
 
 # unet related
 parser.add_argument('--unet.ON', action='store_true')
@@ -233,6 +233,9 @@ parser.add_argument('--trial.ON', action='store_true')
 parser.add_argument('--trial.body_arch', type=str, default='mlp', choices=['mlp', 'resmlp'])
 parser.add_argument('--trial.res_scale', type=float, default=1.)
 parser.add_argument('--trial.n_learnable', type=int, default=2, help='num of learnable layers')
+parser.add_argument('--trial.inact', default='relu', choices=['none', 'relu', 'lrelu'], help='the within activation func in a block')
+parser.add_argument('--trial.outact', default='none', choices=['none', 'relu', 'lrelu'], help='the output activation func in a block')
+
 
 args = parser.parse_args()
 
