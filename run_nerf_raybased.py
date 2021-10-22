@@ -557,6 +557,14 @@ def create_nerf(args, near, far):
     # start iteration
     start = 0
 
+    # use DataParallel
+    if not args.render_only: # when rendering, use just one GPU
+        model = MyDataParallel(model)
+        if model_fine is not None:
+            model_fine = MyDataParallel(model_fine)
+        if hasattr(model.module, 'input_dim'): model.input_dim = model.module.input_dim
+        print(f'Using data parallel')
+
     # load pretrained checkpoint
     if args.pretrained_ckpt:
         ckpt = torch.load(args.pretrained_ckpt)
@@ -577,13 +585,6 @@ def create_nerf(args, near, far):
             start = ckpt['global_step']
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
             print('Resume optimizer successfully')
-
-    # use DataParallel
-    if not args.render_only: # when rendering, use just one GPU
-        model = MyDataParallel(model)
-        if model_fine is not None:
-            model_fine = MyDataParallel(model_fine)
-        if hasattr(model.module, 'input_dim'): model.input_dim = model.module.input_dim
 
     # pruning, before 'render_kwargs_train'
     if args.model_name in ['nerf_v2', 'nerf_v3'] and args.pruner:

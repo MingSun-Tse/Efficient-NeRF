@@ -603,13 +603,25 @@ def load_weights(model, ckpt_path, key):
 
 def load_weights_v2(model, ckpt, key):
     from collections import OrderedDict
+
+    model_dataparallel = False
+    for name, module in model.named_modules():
+        if name.startswith('module.'):
+            model_dataparallel = True
+            break
+
     state_dict = ckpt[key]
-    new_state_dict = OrderedDict()
+    weights_dataparallel = False
     for k, v in state_dict.items():
-        if 'module.' in k:
-            k = k[7:]
-        new_state_dict[k] = v
-    model.load_state_dict(new_state_dict)
+        if k.startswith('module.'):
+            weights_dataparallel = True
+            break
+    
+    if model_dataparallel and weights_dataparallel or (not model_dataparallel) and (not weights_dataparallel):
+        model.load_state_dict(state_dict)
+    else:
+        raise NotImplementedError
+
 
 def get_selected_coords(coords, N_rand, mode):
     coords = coords.long() # [H, W, 2]
