@@ -611,7 +611,9 @@ class NeRF_v3_2(nn.Module):
             inact = get_activation(args.trial.inact)
             outact = get_activation(args.trial.outact)
             if args.trial.body_arch in ['resmlp']:
-                n_block = (D - 2) // 2 # 2 layers in a ResMLP
+                n_block = (D - 2) // 2 # 2 layers in a ResMLP, deprecated since there can be >2 layers in a block, use --trial.n_block
+                if args.trial.n_block > 0:
+                    n_block = args.trial.n_block
                 body = [ResMLP(W, inact=inact, outact=outact, res_scale=args.trial.res_scale, n_learnable=args.trial.n_learnable) 
                     for _ in range(n_block)]
             elif args.trial.body_arch in ['mlp']:
