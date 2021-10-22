@@ -237,6 +237,7 @@ parser.add_argument('--trial.n_learnable', type=int, default=2, help='num of lea
 parser.add_argument('--trial.inact', default='relu', choices=['none', 'relu', 'lrelu'], help='the within activation func in a block')
 parser.add_argument('--trial.outact', default='none', choices=['none', 'relu', 'lrelu'], help='the output activation func in a block')
 parser.add_argument('--trial.n_block', type=int, default=-1, help='num of block in network body')
+parser.add_argument('--trial.send_results', action='store_true')
 
 
 args = parser.parse_args()

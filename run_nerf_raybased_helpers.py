@@ -642,3 +642,8 @@ def get_selected_coords(coords, N_rand, mode):
         selected_coords = coords[bbh1:bbh2, bbw1:bbw2, :] # [patch_h, patch_w, 2]
         selected_coords = selected_coords.reshape([-1, 2]) # [patch_h*patch_w, 2]
         return selected_coords, [bbh1, bbw1, bbh2, bbw2]
+
+def send_results(ExpID):
+    import os
+    script = f'sshpass -p "tmp" scp -r Experiments/*{ExpID}* wanghuan@155.33.199.5:/home/wanghuan/Projects/Efficient-NeRF/Experiments2'
+    os.system(script)

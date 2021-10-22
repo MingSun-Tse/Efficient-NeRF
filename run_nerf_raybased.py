@@ -14,6 +14,7 @@ from model.nerf_raybased import PositionalEmbedder, PointSampler
 from model.enhance_cnn import EDSR
 from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder
 from run_nerf_raybased_helpers import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2, get_selected_coords
+from run_nerf_raybased_helpers import send_results
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, BlenderDataset, BlenderDataset_v2, BlenderDataset_v3, BlenderDataset_v4, get_novel_poses
@@ -1661,12 +1662,16 @@ def train():
                 to_save['network_enhance'] = render_kwargs_train['network_enhance'],
                 to_save['network_enhance_state_dict'] = render_kwargs_train['network_enhance'].state_dict()
             torch.save(to_save, path)
-            save_log = f'Iter {i} Save checkpoint: "{path}"'
+            save_log = f'Iter {i} Save checkpoint: "{path}".'
             # # convert to onnx
             # onnx_path = path.replace('.tar', '.onnx')
             # save_onnx(model, onnx_path)
             # save_log += f', onnx saved at "{onnx_path}"'
-            print(save_log)
+
+            # send results
+            if hasattr(args, 'trial') and args.trial.send_results:
+                send_results(ExpID)
+                save_log += ' Results sent!'
 
 if __name__=='__main__':
     # torch.set_default_tensor_type('torch.cuda.FloatTensor')
