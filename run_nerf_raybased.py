@@ -14,7 +14,7 @@ from model.nerf_raybased import PositionalEmbedder, PointSampler
 from model.enhance_cnn import EDSR
 from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder
 from run_nerf_raybased_helpers import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2, get_selected_coords
-from run_nerf_raybased_helpers import send_results
+from run_nerf_raybased_helpers import send_results, undataparallel
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, BlenderDataset, BlenderDataset_v2, BlenderDataset_v3, BlenderDataset_v4, get_novel_poses
@@ -574,21 +574,24 @@ def create_nerf(args, near, far):
         ckpt = torch.load(args.pretrained_ckpt)
         if 'network_fn' in ckpt:
             model = ckpt['network_fn']
+            grad_vars = list(model.parameters())
             if model_fine is not None:
                 assert 'network_fine' in ckpt
                 model_fine = ckpt['network_fine']
-            print(f'Use model arch saved in checkpoint: "{args.pretrained_ckpt}"')
+                grad_vars += list(model_fine.parameters())
+            optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
+            print(f'Use model arch saved in checkpoint "{args.pretrained_ckpt}", and build a new optimizer.')
         
         # load state_dict
         load_weights_v2(model, ckpt, 'network_fn_state_dict')
         if model_fine is not None:
             load_weights_v2(model_fine, ckpt, 'network_fine_state_dict')
-        print(f'Load pretrained ckpt successfully: "{args.pretrained_ckpt}"')
+        print(f'Load pretrained ckpt successfully: "{args.pretrained_ckpt}".')
         
         if args.resume:
             start = ckpt['global_step']
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
-            print('Resume optimizer successfully')
+            print('Resume optimizer successfully.')
 
     # pruning, before 'render_kwargs_train'
     if args.model_name in ['nerf_v2', 'nerf_v3'] and args.pruner:
@@ -1654,16 +1657,16 @@ def train():
             path = os.path.join(logger.weights_path, 'ckpt.tar'.format(i))
             to_save = {
                 'global_step': global_step,
-                'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
+                'network_fn_state_dict': undataparallel(render_kwargs_train['network_fn'].state_dict()),
                 'optimizer_state_dict': optimizer.state_dict(),
             }
             if args.model_name in ['nerf'] and args.N_importance > 0:
-                to_save['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
+                to_save['network_fine_state_dict'] = undataparallel(render_kwargs_train['network_fine'].state_dict())
             if args.model_name in ['nerf_v3.2']:
-                to_save['network_fn'] = render_kwargs_train['network_fn']
+                to_save['network_fn'] = undataparallel(render_kwargs_train['network_fn'])
             if args.enhance_cnn:
-                to_save['network_enhance'] = render_kwargs_train['network_enhance'],
-                to_save['network_enhance_state_dict'] = render_kwargs_train['network_enhance'].state_dict()
+                to_save['network_enhance'] = undataparallel(render_kwargs_train['network_enhance']),
+                to_save['network_enhance_state_dict'] = undataparallel(render_kwargs_train['network_enhance'].state_dict())
             torch.save(to_save, path)
             save_log = f'Iter {i} Save checkpoint: "{path}".'
             # # convert to onnx
