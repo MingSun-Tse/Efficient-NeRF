@@ -184,7 +184,8 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         print(f'[#{i}] frame, rendering begins')
         if args.model_name in ['nerf']:
             rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs) 
-
+            H_, W_ = H, W
+        
         else: # for our raybased nerf
             model = render_kwargs['network_fn']
             perturb = render_kwargs['perturb']
@@ -357,7 +358,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             H_ = W_ = int(math.sqrt(rgb.numel() / 3)) # TODO-@mst: may not be square
             rgb = rgb.view(H_, W_, 3)
             disp = rgb # placeholder, to maintain compability
-  
+
         rgbs.append(rgb)
         disps.append(disp)
 
