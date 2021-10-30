@@ -4,6 +4,7 @@ torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn 
 import torch.nn.functional as F
 import numpy as np, time, math
+from collections import OrderedDict
 
 # TODO: remove this dependency
 try:
@@ -647,3 +648,22 @@ def send_results(ExpID):
     import os
     script = f'sshpass -p "tmp" scp -r Experiments/*{ExpID}* wanghuan@155.33.199.5:/home/wanghuan/Projects/Efficient-NeRF/Experiments2'
     os.system(script)
+
+def undataparallel(input):
+    '''remove the module. prefix caused by nn.DataParallel'''
+    if isinstance(input, nn.Module):
+        model = input
+        if hasattr(model, 'module'):
+            model = model.module
+        return model
+    elif isinstance(input, OrderedDict):
+        state_dict = input
+        w = OrderedDict()
+        for k, v in state_dict.items():
+            if k.startswith('module.'):
+                assert len(k.split('module.')) == 2
+                k = k.split('module.')[1]
+            w[k] = v
+        return w
+    else:
+        raise NotImplementedError
