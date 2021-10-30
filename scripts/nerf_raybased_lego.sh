@@ -5,7 +5,7 @@ CUDA_VISIBLE_DEVICES=2 python run_nerf_raybased.py --config configs/lego.txt --m
 # better nerf
 CUDA_VISIBLE_DEVICES=3 python run_nerf_raybased.py --config configs/lego.txt --model_name nerf --N_importance 256 --N_samples 128 --project nerf__lego__NSample128+256 --screen
 # run nerf on DONERF data
-CUDA_VISIBLE_DEVICES=3 python run_nerf_raybased.py --config configs/lego.txt --model_name nerf --project nerf__DONERF_bulldozer --screen
+CUDA_VISIBLE_DEVICES=3 python run_nerf_raybased.py --config configs/lego.txt --model_name nerf --project nerf__DONERF_bulldozer --screen --n_pose_video 20,1,1
 
 ## Train: nerf, ship
 CUDA_VISIBLE_DEVICES=3 python run_nerf.py --config configs/ship.txt --project nerf__ship --screen --debug
