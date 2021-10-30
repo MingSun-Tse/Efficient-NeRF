@@ -687,7 +687,7 @@ def create_nerf(args, near, far):
         dummy_rays_d = torch.randn(1, 3).to(device)
         n_flops = get_n_flops_(model, input=dummy_rays_o, count_adds=False, rays_d=dummy_rays_d, rays_d2=dummy_rays_d)
     
-    print(f'Model complexity per pixel: FLOPs {n_flops/1e6:.4f}M, Params {n_params/1e6:.4f}M')
+    print(f'Model complexity per pixel: FLOPs {n_flops/1e6:.10f}M, Params {n_params/1e6:.10f}M')
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
 
 

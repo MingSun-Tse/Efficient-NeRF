@@ -70,7 +70,13 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=Fa
     poses = np.concatenate(all_poses, 0)
     
     H, W = imgs[0].shape[:2]
-    camera_angle_x = float(meta['camera_angle_x'])
+    # -- @mst: DONERF data includes 'camera_angle_x' in 'dataset_info.json'. Here expand to its case.
+    if 'camera_angle_x' in meta: 
+        camera_angle_x = float(meta['camera_angle_x'])
+    else: # to train with DONERF data
+        with open(os.path.join(basedir, 'dataset_info.json'), 'r') as fp:
+            camera_angle_x = float(json.load(fp)['camera_angle_x'])
+    # --
     focal = .5 * W / np.tan(.5 * camera_angle_x)
     
     thetas = np.linspace(-180, 180, n_pose + 1)[:-1]
