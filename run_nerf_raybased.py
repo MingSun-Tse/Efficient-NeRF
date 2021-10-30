@@ -634,7 +634,12 @@ def create_nerf(args, near, far):
     n_params = get_n_params_(model)
     if args.model_name == 'nerf':
         dummy_input = torch.randn(1, input_ch + input_ch_views).to(device)
+        
+        # -- confirmed with torchsummaryX, fn 'get_n_flops_' works the same as it
+        # from torchsummaryX import summary
+        # summary(model, dummy_input)
         n_flops = get_n_flops_(model, input=dummy_input, count_adds=False) * (args.N_samples + args.N_samples +  args.N_importance)
+        # --
 
         # macs, params = get_model_complexity_info(model, dummy_input.shape, as_strings=True,
         #                                         print_per_layer_stat=True, verbose=True)
