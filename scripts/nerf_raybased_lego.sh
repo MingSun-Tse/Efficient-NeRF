@@ -25,17 +25,34 @@ CUDA_VISIBLE_DEVICES=3 python run_nerf_create_data.py --config configs/lego.txt 
 CUDA_VISIBLE_DEVICES=0 python run_nerf_create_data.py --create_data rand --config configs/lego.txt --teacher_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --n_pose_kd 5000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v7_Rand_Origins_Dirs_4096RaysPerNpy --screen --project nerf__lego__CreateData_v7_Rand_Origins_Dirs_4096RaysPerNpy # data v7
 
 
-# create data (.npy) ship
-CUDA_VISIBLE_DEVICES=0 python run_nerf_create_data.py --config configs/ship.txt --teacher_ckpt Experiments/*-084751/*/200000.tar --n_pose_kd 100,25,1 --datadir_kd data/nerf_synthetic/ship:data/nerf_synthetic/ship_v5_NPose100,25,1 --screen --project nerf__ship__CreateData_NPose100,25,1
 
-# create data (.npy) mic
-CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --config configs/mic.txt --teacher_ckpt Experiments/*-011144/*/200000.tar --n_pose_kd 100,25,1 --datadir_kd data/nerf_synthetic/mic:data/nerf_synthetic/mic_v5_NPose100,25,1 --screen --project nerf__mic__CreateData_NPose100,25,1
+# ********************* NeRF realistic synthetic dataset *********************
+# create data v8 (.npy) lego
+CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --config configs/lego.txt --teacher_ckpt Experiments/*-195444/*/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__lego__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
 
-# create data (.npy) chair
-CUDA_VISIBLE_DEVICES=2 python run_nerf_create_data.py --config configs/chair.txt --teacher_ckpt Experiments/*-011641/*/200000.tar --n_pose_kd 100,25,1 --datadir_kd data/nerf_synthetic/chair:data/nerf_synthetic/chair_v5_NPose100,25,1 --screen --project nerf__chair__CreateData_NPose100,25,1
+# create data v8 (.npy) ship
+CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --config configs/ship.txt --teacher_ckpt Experiments/*-084751/*/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/ship:data/nerf_synthetic/ship_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__ship__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
 
-# create data (.npy) drums
-CUDA_VISIBLE_DEVICES=3 python run_nerf_create_data.py --config configs/drums.txt --teacher_ckpt Experiments/*-011513/*/200000.tar --n_pose_kd 100,25,1 --datadir_kd data/nerf_synthetic/drums:data/nerf_synthetic/drums_v5_NPose100,25,1 --screen --project nerf__drums__CreateData_NPose100,25,1
+# create data v8 (.npy) mic
+CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --config configs/mic.txt --teacher_ckpt Experiments/*-011144/*/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/mic:data/nerf_synthetic/mic_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__mic__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
+
+# create data v8 (.npy) chair
+CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --config configs/chair.txt --teacher_ckpt Experiments/*-011641/*/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/chair:data/nerf_synthetic/chair_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__chair__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
+
+# create data v8 (.npy) drums
+CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --config configs/drums.txt --teacher_ckpt Experiments/*-011513/*/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/drums:data/nerf_synthetic/drums_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__drums__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
+
+# create data v8 (.npy) ficus
+
+
+# create data v8 (.npy) materials
+
+
+# create data v8 (.npy) hotdog
+
+
+# ********************* NeRF realistic synthetic dataset *********************
+
 
 
 # kd with new data lego
