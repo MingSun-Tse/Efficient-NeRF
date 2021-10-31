@@ -12,7 +12,7 @@ from model.nerf_raybased import NeRF, NeRF_v2, NeRF_v3, NeRF_v3_2, NeRF_v3_3, Ne
 from model.nerf_raybased import NeRF_v3_8, NeRF_v6_enhance, NeRF_v7
 from model.nerf_raybased import PositionalEmbedder, PointSampler
 from model.enhance_cnn import EDSR
-from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder
+from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder, get_rays_np
 from run_nerf_raybased_helpers import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2, get_selected_coords
 from run_nerf_raybased_helpers import send_results, undataparallel
 from load_llff import load_llff_data
@@ -1258,6 +1258,7 @@ def train():
         print('get rays')
         rays = np.stack([get_rays_np(H, W, focal, p) for p in poses[:,:3,:4]], 0) # [N, ro+rd, H, W, 3]
         print('done, concats')
+        if isinstance(images, torch.Tensor): images = images.cpu().data.numpy()
         rays_rgb = np.concatenate([rays, images[:,None]], 1) # [N, ro+rd+rgb, H, W, 3]
         rays_rgb = np.transpose(rays_rgb, [0,2,3,1,4]) # [N, H, W, ro+rd+rgb, 3]
         rays_rgb = np.stack([rays_rgb[i] for i in i_train], 0) # train images only
