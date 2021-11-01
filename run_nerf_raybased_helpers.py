@@ -669,8 +669,7 @@ def undataparallel(input):
         raise NotImplementedError
 
 def get_rays_np(H, W, focal, c2w):
-    if isinstance(c2w, torch.Tensor): # @mst: keep back-compatibility
-        c2w = c2w.data.cpu().numpy() 
+    c2w, focal = to_array(c2w), to_array(focal)
     i, j = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32), indexing='xy')
     dirs = np.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -np.ones_like(i)], -1)
     # Rotate ray directions from camera frame to the world frame

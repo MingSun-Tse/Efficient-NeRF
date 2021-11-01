@@ -72,7 +72,7 @@ def get_embedder(multires, i=0):
 class PointSampler():
     def __init__(self, H, W, focal, n_sample, near, far):
         self.H, self.W = H, W
-        i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H))
+        i, j = torch.meshgrid(torch.linspace(0, W-1, W).to(device), torch.linspace(0, H-1, H).to(device))
         i, j = i.t(), j.t()
         self.dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], dim=-1).to(device) # [H, W, 3]
         
