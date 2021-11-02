@@ -43,14 +43,13 @@ CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --confi
 CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --config configs/drums.txt --teacher_ckpt Experiments/*-011513/*/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/drums:data/nerf_synthetic/drums_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__drums__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
 
 # create data v8 (.npy) ficus
-
+CUDA_VISIBLE_DEVICES=0 python run_nerf_create_data.py --create_data rand --config configs/ficus.txt --teacher_ckpt Experiments/*-170404/weights/ckpt.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/ficus:data/nerf_synthetic/ficus_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__ficus__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
 
 # create data v8 (.npy) materials
-
+CUDA_VISIBLE_DEVICES=0 python run_nerf_create_data.py --create_data rand --config configs/materials.txt --teacher_ckpt Experiments/*-170616/weights/ckpt.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/materials:data/nerf_synthetic/materials_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__materials__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
 
 # create data v8 (.npy) hotdog
-
-
+CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --config configs/hotdog.txt --teacher_ckpt Experiments/*-170420/weights/ckpt.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/hotdog:data/nerf_synthetic/hotdog_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__hotdog__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
 # ********************* NeRF realistic synthetic dataset *********************
 
 
