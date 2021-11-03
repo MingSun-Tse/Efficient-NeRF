@@ -1300,7 +1300,15 @@ def train():
         else:
             decay_rate = 0.1
             decay_steps = args.lrate_decay * 1000
-            new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
+            
+            if args.warmup_lr: # @mst: example '0.0001,2000'
+                start_lr, end_iter = [float(x) for x in args.warmup_lr.split(',')]
+                if global_step < end_iter: # increase lr until args.lrate
+                    new_lrate = (args.lrate - start_lr) / end_iter * global_step + start_lr
+                else: # decrease lr as before
+                    new_lrate = args.lrate * (decay_rate ** ((global_step - end_iter) / decay_steps))
+            else:
+                new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
             for param_group in optimizer.param_groups:
                 param_group['lr'] = new_lrate
 
@@ -1575,6 +1583,7 @@ def train():
             if args.enhance_cnn:
                 hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
                 loss_line.update('hist_psnr1', hist_psnr1, '.4f')
+            loss_line.update('LR', new_lrate, '.10f')
         
         # <<<<<<<<<<< inner loop (get data, forward, add loss) ends <<<<<<<<<<<
 
