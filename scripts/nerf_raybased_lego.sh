@@ -50,17 +50,18 @@ CUDA_VISIBLE_DEVICES=0 python run_nerf_create_data.py --create_data rand --confi
 
 # create data v8 (.npy) hotdog
 CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --config configs/hotdog.txt --teacher_ckpt Experiments/*-170420/weights/ckpt.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/hotdog:data/nerf_synthetic/hotdog_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__hotdog__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
-# ********************* NeRF realistic synthetic dataset *********************
 
 
-# ********************* NeRF real dataset *********************
+# ********************* NeRF real image dataset *********************
 # create data v8 (.npy) room
 CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --config configs/room.txt --teacher_ckpt Experiments/*-121931/weights/ckpt.tar --n_pose_kd 10000 --datadir_kd data/nerf_llff_data/room:data/nerf_llff_data/room_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__room__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
 
 # create data v8 (.npy) fern
 CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --config configs/fern.txt --teacher_ckpt Experiments/*-121854/weights/ckpt.tar --n_pose_kd 10000 --datadir_kd data/nerf_llff_data/fern:data/nerf_llff_data/fern_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__fern__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data
 
-# ********************* NeRF real dataset *********************
+# ********************* Run nerf_v3.2 on real image dataset *********************
+# room
+CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/room_noview.txt --n_sample_per_ray 16 --netwidth 181 --netdepth 88 --datadir_kd data/nerf_llff_data/room:data/nerf_llff_data/room_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --project nerfv3.2__room__S16W181D88_DPRGB_Res_NoDir_ResMLPBody_DataV8_BS98304_Hard0.2_20xBS --cache_ignore data --screen --trial.ON --trial.body_arch resmlp --num_worker 8
 
 
 # kd with new data lego
