@@ -5,7 +5,7 @@ dataset_type = blender
 
 no_batching = True
 
-use_viewdirs = False
+use_viewdirs = False # @mst: our model does not need viewdirs as input
 white_bkgd = True
 lrate_decay = 500
 

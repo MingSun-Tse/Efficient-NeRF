@@ -934,7 +934,7 @@ class InfiniteSamplerWrapper(data.sampler.Sampler):
         return 2 ** 31
 
 def get_dataloader(dataset_type, datadir, pseudo_ratio=0.5):
-    if dataset_type == 'blender':
+    if dataset_type in ['blender', 'llff']:
         if args.data_mode in ['images']:
             trainset = BlenderDataset(datadir, pseudo_ratio)
             trainloader = torch.utils.data.DataLoader(dataset=trainset, 
@@ -1140,6 +1140,7 @@ def train():
     test_poses, test_images = poses[i_test], images[i_test]
     n_original_img = len(train_images)
     if args.dataset_type == 'blender':
+        # @mst: for blender dataset, get more diverse video poses
         video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
     else:
         video_poses = render_poses
@@ -1187,15 +1188,11 @@ def train():
     # @mst: use dataloader for training
     kd_poses = None
     if args.datadir_kd:
-        if args.dataset_type == 'blender':
+        if args.dataset_type in ['blender', 'llff']:
             pr = get_pseudo_ratio(args.pseudo_ratio_schedule, current_step=start+1)
             trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
-        else: # LLFF dataset
-            kd_poses = copy.deepcopy(render_poses)
-            print(f'Using teacher to render {len(kd_poses)} images for KD...')
-            kd_targets = get_teacher_targets_v2(kd_poses, H, W, focal, render_kwargs_train, args, pose_tag=args.n_pose_kd)
-            n_total_img = len(kd_poses) + len(train_images)
-            pr = len(kd_poses) / n_total_img
+        else:
+            raise NotImplementedError
         print(f'Loaded data. Now total #train files: {n_total_img}')
 
     # get video_targets
@@ -1363,7 +1360,7 @@ def train():
                     
                     elif args.data_mode in ['rays', '16x16patches_v2', '16x16patches_v3']:
                         if i % args.i_update_data == 0: # update trainloader, possibly load more data
-                            if args.dataset_type == 'blender':
+                            if args.dataset_type in ['blender', 'llff']:
                                 t_ = time.time()
                                 trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
                                 print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train files: {n_total_img}')
