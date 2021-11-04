@@ -355,7 +355,10 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 rgb = rgb.permute(0, 2, 3, 1) # [1, H, W, 3]
 
             # reshape to image
-            H_ = W_ = int(math.sqrt(rgb.numel() / 3)) # TODO-@mst: may not be square
+            if args.dataset_type == 'llff':
+                H_, W_ = H, W # non-square images
+            elif args.dataset_type == 'blender':
+                H_ = W_ = int(math.sqrt(rgb.numel() / 3))
             rgb = rgb.view(H_, W_, 3)
             disp = rgb # placeholder, to maintain compability
 
