@@ -153,16 +153,38 @@ def poses_avg(poses):
 
 
 def render_path_spiral(c2w, up, rads, focal, zdelta, zrate, rots, N):
+    '''@mst: zrate=0.5, rots=2
+    '''
     render_poses = []
     rads = np.array(list(rads) + [1.])
     hwf = c2w[:,4:5]
     
+    # -- @mst: set globals for later use
+    global GLOBALS; GLOBALS = {}
+    GLOBALS['c2w'] = c2w
+    GLOBALS['up'] = up
+    GLOBALS['rads'] = rads
+    GLOBALS['focal'] = focal
+    # --
     for theta in np.linspace(0., 2. * np.pi * rots, N+1)[:-1]:
         c = np.dot(c2w[:3,:4], np.array([np.cos(theta), -np.sin(theta), -np.sin(theta*zrate), 1.]) * rads) 
-        z = normalize(c - np.dot(c2w[:3,:4], np.array([0,0,-focal, 1.])))
+        z = normalize(c - np.dot(c2w[:3,:4], np.array([0,0,-focal, 1.]))) # @mst: depth?
         render_poses.append(np.concatenate([viewmatrix(z, up, c), hwf], 1))
     return render_poses
-    
+
+# @mst
+def get_rand_pose():
+    # -- pass local variables
+    rads, c2w, up, focal = GLOBALS['rads'], GLOBALS['c2w'], GLOBALS['up'], GLOBALS['focal']
+    rots, zrate = 2, 0.5
+    hwf = c2w[:,4:5]
+    # --
+    theta1, theta2 = 0, 2. * np.pi * rots
+    theta = theta1 + np.random.rand() * (theta2 - theta1)
+    c = np.dot(c2w[:3,:4], np.array([np.cos(theta), -np.sin(theta), -np.sin(theta*zrate), 1.]) * rads) 
+    z = normalize(c - np.dot(c2w[:3,:4], np.array([0,0,-focal, 1.]))) # @mst: depth?
+    pose = np.concatenate([viewmatrix(z, up, c), hwf], 1)
+    return to_tensor(pose)
 
 
 def recenter_poses(poses):
@@ -268,7 +290,7 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
 
     else:
         
-        c2w = poses_avg(poses)
+        c2w = poses_avg(poses) # @mst: poses: [20, 3, 5]
         print('recentered', c2w.shape)
         print(c2w[:3,:4])
 
@@ -300,8 +322,8 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
 
         # Generate poses for spiral path
         render_poses = render_path_spiral(c2w_path, up, rads, focal, zdelta, zrate=.5, rots=N_rots, N=N_views)
-        
-        
+        # import pdb; pdb.set_trace()
+
     render_poses = np.array(render_poses).astype(np.float32)
 
     c2w = poses_avg(poses)
@@ -316,31 +338,3 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     poses = poses.astype(np.float32)
 
     return to_tensor(images), to_tensor(poses), to_tensor(bds), to_tensor(render_poses), i_test
-
-def save_llff_data():
-    pass
-
-def load_llff_data_v2():
-    pass
-
-class LLFFDataset(Dataset):
-    def __init__(self, datadir, pseudo_ratio=0.5, n_original=100, split='train'):
-        self.datadir = datadir
-        with open(os.path.join(datadir, 'transforms_{}.json'.format(split)), 'r') as fp:
-            frames = json.load(fp)['frames']
-            n_pseudo = int(n_original / (1 - pseudo_ratio) - n_original)
-            pseudo_indices = np.random.permutation(len(frames) - n_original)[:n_pseudo] + n_original
-            self.frames = frames[:n_original]
-            for ix in pseudo_indices:
-                self.frames.append(frames[ix]) 
-            
-    def __getitem__(self, index):
-        index = index % (len(self.frames))
-        frame = self.frames[index]
-        pose = torch.Tensor(frame['transform_matrix'])
-        fname = os.path.join(self.datadir, frame['file_path'] + '.npy') # 'file_path' includes file extension
-        img = torch.Tensor(np.load(fname))
-        return img, pose, index
-
-    def __len__(self):
-        return len(self.frames)

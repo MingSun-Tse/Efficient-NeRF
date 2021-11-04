@@ -11,7 +11,6 @@ from run_nerf_raybased_helpers import to_tensor, to_array, mse2psnr, to8b, img2m
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, setup_blender_datadir_v2 as setup_blender_datadir, save_blender_data, get_novel_poses
-from load_blender import get_rand_pose
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
@@ -496,6 +495,8 @@ def train():
             far = 1.
         print('NEAR FAR', near, far)
 
+        from load_llff import get_rand_pose
+
     elif args.dataset_type == 'blender':
         images, poses, render_poses, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip, n_pose=args.n_pose_video)
         print('Loaded blender', images.shape, poses.shape, render_poses.shape, hwf, args.datadir)
@@ -509,6 +510,8 @@ def train():
             images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
         else:
             images = images[...,:3]
+
+        from load_blender import get_rand_pose
 
     elif args.dataset_type == 'deepvoxels':
 
@@ -624,11 +627,14 @@ def train():
         for i in range(1, args.n_pose_kd+1):
             pose = get_rand_pose()
             focal_ = focal * (np.random.rand() + 1) # scale focal by [1, 2)
-            rays_o, rays_d = get_rays1(H, W, focal_, pose) # rays_o, rays_d shape: [H, W, 3]
+            rays_o, rays_d = get_rays1(H, W, focal_, pose[:3,:4]) # rays_o, rays_d shape: [H, W, 3]
+            # @mst: note, here it MUST be 'pose[:3,:4]', using 'pose' will cause white rgb output.
+
             batch_rays = torch.stack([rays_o, rays_d], 0)
             rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
                                             verbose=False, retraw=False,
                                             **render_kwargs_)
+            
             data_ = torch.cat([rays_o, rays_d, rgb], dim=-1) # [H, W, 9]
             data += [data_.view(-1, 9)]
             print(f'[{i}/{args.n_pose_kd}] Using teacher to render more images... elapsed time: {(time.time() - t0):.2f}s')
@@ -638,6 +644,7 @@ def train():
             if i <= 5:
                 filename = f'{datadir_kd_new}/pseudo_sample_{i}.png'
                 imageio.imwrite(filename, to8b(rgb))
+                print(rgb.abs().mean())
 
             # save to avoid out of memory
             if i % i_save == 0:
@@ -1027,6 +1034,7 @@ def train():
             if img_ix <= 5:
                 filename = f'{datadir_kd_new}/pseudo_sample_{img_ix}.png'
                 imageio.imwrite(filename, to8b(rgb))
+            
 
 if __name__=='__main__':
     train()
