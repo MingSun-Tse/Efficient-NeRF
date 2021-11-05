@@ -129,9 +129,10 @@ def normalize(x):
 
 def viewmatrix(z, up, pos):
     vec2 = normalize(z)
-    vec1_avg = up
-    vec0 = normalize(np.cross(vec1_avg, vec2))
-    vec1 = normalize(np.cross(vec2, vec0))
+    # vec1_avg = up
+    # vec0 = normalize(np.cross(vec1_avg, vec2))
+    vec0 = normalize(np.cross(up, vec2)) # @mst: replace above with this neat line; shape (3,)
+    vec1 = normalize(np.cross(vec2, vec0)) # @mst: shape (3,)
     m = np.stack([vec0, vec1, vec2, pos], 1)
     return m
 
@@ -140,14 +141,11 @@ def ptstocam(pts, c2w):
     return tt
 
 def poses_avg(poses):
-
     hwf = poses[0, :3, -1:]
-
-    center = poses[:, :3, 3].mean(0)
-    vec2 = normalize(poses[:, :3, 2].sum(0))
-    up = poses[:, :3, 1].sum(0)
+    center =           poses[:, :3, 3].mean(0)
+    vec2   = normalize(poses[:, :3, 2].sum(0))
+    up     =           poses[:, :3, 1].sum(0)
     c2w = np.concatenate([viewmatrix(vec2, up, center), hwf], 1)
-    
     return c2w
 
 
@@ -188,7 +186,6 @@ def get_rand_pose():
 
 
 def recenter_poses(poses):
-
     poses_ = poses+0
     bottom = np.reshape([0,0,0,1.], [1,4])
     c2w = poses_avg(poses)
@@ -264,7 +261,7 @@ def spherify_poses(poses, bds):
     return poses_reset, new_poses, bds
     
 
-def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=False, path_zflat=False):
+def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=False, path_zflat=False, n_pose_video=120):
     
 
     poses, bds, imgs = _load_data(basedir, factor=factor) # factor=8 downsamples original imgs by 8x
@@ -283,7 +280,11 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     bds *= sc
     
     if recenter:
+        # print(f'poses befoe recenter')
+        # print(poses) # @mst: [N, 3, 5]
         poses = recenter_poses(poses)
+        # print(f'poses after recenter')
+        # print(poses)
         
     if spherify:
         poses, render_poses, bds = spherify_poses(poses, bds)
@@ -310,7 +311,7 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
         tt = poses[:,:3,3] # ptstocam(poses[:3,3,:].T, c2w).T
         rads = np.percentile(np.abs(tt), 90, 0)
         c2w_path = c2w
-        N_views = 120
+        N_views = n_pose_video
         N_rots = 2
         if path_zflat:
 #             zloc = np.percentile(tt, 10, 0)[2]

@@ -205,12 +205,14 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             
             elif args.model_name in ['nerf_v3.2']:
                 with torch.no_grad():
-                    model_input = positional_embedder(point_sampler.sample_test(c2w[:3, :4]))
+                    pts = point_sampler.sample_test(c2w[:3, :4])
+                    model_input = positional_embedder(pts)
                     torch.cuda.synchronize(); t_input = time.time()
                     rgb = model(model_input)
                     torch.cuda.synchronize(); t_forward = time.time()
                     print(f'[#{i}] frame, prepare input (embedding): {t_input - t0:.4f}s')
                     print(f'[#{i}] frame, model forward: {t_forward - t_input:.4f}s')
+                    print(f'[#{i}] frame, mean sampled point: {to_array(pts.view(pts.shape[0], -1, 3).mean(dim=1).mean(dim=0))}')
             
             elif args.model_name in ['nerf_v3.3', 'nerf_v3.5']:
                 with torch.no_grad():
@@ -1051,7 +1053,8 @@ def train():
     if args.dataset_type == 'llff':
         images, poses, bds, render_poses, i_test = load_llff_data(args.datadir, args.factor,
                                                                   recenter=True, bd_factor=.75,
-                                                                  spherify=args.spherify)
+                                                                  spherify=args.spherify,
+                                                                  n_pose_video=args.n_pose_video)
         hwf = poses[0,:3,-1]
         poses = poses[:,:3,:4]
         print('Loaded llff', images.shape, render_poses.shape, hwf, args.datadir)
@@ -1165,12 +1168,26 @@ def train():
     #     netprint(f'radius: {(p[:3, -1]).norm().item()}')
     # exit()
     # # -------------
+    
+    # check test poses and video poses
+    avg_test_pose = test_poses.mean(dim=0)
+    avg_video_pose = video_poses.mean(dim=0)
+    avg_train_pose = train_poses.mean(dim=0)
+    netprint(f'avg_test_pose:')
+    netprint(avg_test_pose)
+    netprint(f'avg_video_pose:')
+    netprint(avg_video_pose)
+    netprint(f'avg_train_pose:')
+    netprint(avg_train_pose)
+    # video_poses[:, :3, 3].norm(dim=1)
+    # train_poses[:, :3, 3].norm(dim=1)
+    # test_poses[:, :3, 3].norm(dim=1)
 
     # data sketch
     print(f'{len(i_train)} original train views are [{" ".join([str(x) for x in i_train])}]')
     print(f'{len(i_test)} test views are [{" ".join([str(x) for x in i_test])}]')
     print(f'{len(i_val)} val views are [{" ".join([str(x) for x in i_val])}]')
-    print(f'train_images shape {train_images.shape} train_poses shape {train_images.shape}')
+    print(f'train_images shape {train_images.shape} train_poses shape {train_poses.shape} test_poses shape {test_poses.shape}')
 
     if args.test_teacher:
         assert args.teacher_ckpt
