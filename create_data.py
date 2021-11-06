@@ -495,7 +495,7 @@ def train():
             far = 1.
         print('NEAR FAR', near, far)
 
-        from load_llff import get_rand_pose
+        from load_llff import get_rand_pose_v2 as get_rand_pose
 
     elif args.dataset_type == 'blender':
         images, poses, render_poses, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip, n_pose=args.n_pose_video)
