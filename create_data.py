@@ -604,15 +604,22 @@ def train():
             print(f'Create new data. Save to "{datadir_kd_new}". Now total #train samples: {n_img}')
     
     elif args.create_data in ['rand']:
+        split = 0 # index for the generated .npy files
         # set up data directory
         if os.path.exists(datadir_kd_new):
-            if os.path.isfile(datadir_kd_new): 
-                os.remove(datadir_kd_new)
+            if args.rm_existing_data:
+                rm_func = os.remove if os.path.isfile(datadir_kd_new) else shutil.rmtree
+                rm_func(datadir_kd_new)
+                os.makedirs(datadir_kd_new)
+                print(f'Remove existing data dir. Set up new data directory, done!')
             else:
-                shutil.rmtree(datadir_kd_new)
-        os.makedirs(datadir_kd_new)
-        print('Set up new data directory, done!')
-        
+                npys = [x for x in os.listdir(datadir_kd_new) if x.endswith('.npy')]
+                split = len(npys)
+                print(f'Found existing data dir. Keep it. #Existing npy files: {split}')
+        else:
+            os.makedirs(datadir_kd_new)
+            print(f'Set up new data directory, done!')
+
         # set up model
         render_kwargs_ = {x: v for x, v in render_kwargs_train.items()}
         render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
@@ -622,15 +629,15 @@ def train():
 
         # run
         i_save, split_size = 100, 4096 # every 4096 rays will make up a .npy file
-        data, t0, split = [], time.time(), 0
+        data, t0 = [], time.time()
         timer = Timer(args.n_pose_kd)
-        for i in range(1, args.n_pose_kd+1):
+        for i in range(1, args.n_pose_kd + 1):
             pose = get_rand_pose()
-            focal_ = focal * (np.random.rand() + 1) # scale focal by [1, 2)
-            rays_o, rays_d = get_rays1(H, W, focal_, pose[:3,:4]) # rays_o, rays_d shape: [H, W, 3]
+            focal_ = focal * (np.random.rand() + 1) if args.use_rand_focal else focal # scale focal by [1, 2)
+            rays_o, rays_d = get_rays1(H, W, focal_, pose[:3, :4]) # rays_o, rays_d shape: [H, W, 3]
             # @mst: note, here it MUST be 'pose[:3,:4]', using 'pose' will cause white rgb output.
 
-            batch_rays = torch.stack([rays_o, rays_d], 0)
+            batch_rays = torch.stack([rays_o, rays_d], dim=0)
             rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
                                             verbose=False, retraw=False,
                                             **render_kwargs_)

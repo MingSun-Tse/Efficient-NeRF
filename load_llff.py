@@ -1,7 +1,7 @@
 import numpy as np
 import os, imageio
 from torch.utils.data import Dataset
-from run_nerf_raybased_helpers import to_tensor, to8b
+from run_nerf_raybased_helpers import to_tensor, to_array, to8b, visualize_3d
 
 
 ########## Slightly modified version of LLFF data loading code 
@@ -151,13 +151,6 @@ def render_path_spiral(c2w, up, rads, focal, zdelta, zrate, rots, N):
     render_poses = []
     rads = np.array(list(rads) + [1.]) # 
     hwf = c2w[:,4:5]
-    
-    # -- @mst: set globals for later use
-    GLOBALS['c2w'] = c2w
-    GLOBALS['up'] = up
-    GLOBALS['rads'] = rads
-    GLOBALS['focal'] = focal
-    # --
     for theta in np.linspace(0., 2. * np.pi * rots, N+1)[:-1]:
         c = np.dot(c2w[:3,:4], np.array([np.cos(theta), -np.sin(theta), -np.sin(theta*zrate), 1.]) * rads)
         # @mst: above is equivalent to matrix mul: [3, 4] @ [4, 1]
@@ -165,7 +158,7 @@ def render_path_spiral(c2w, up, rads, focal, zdelta, zrate, rots, N):
         render_poses.append(np.concatenate([viewmatrix(z, up, c), hwf], 1))
     
     # @mst: try our random poses
-    # render_poses = [get_rand_pose_v2().data.cpu().numpy() for _ in range(N)]
+    render_poses = [get_rand_pose_v2().data.cpu().numpy() for _ in range(N)]
     return render_poses
 
 
@@ -187,14 +180,38 @@ def get_rand_pose():
 # @mst: prior version does not work well
 def get_rand_pose_v2():
     # -- pass local variables
-    rads, c2w, up, focal = GLOBALS['max_rads'], GLOBALS['c2w'], GLOBALS['up'], GLOBALS['focal']
+    c2w, up, focal, poses = GLOBALS['c2w'], GLOBALS['up'], GLOBALS['focal'], GLOBALS['poses']
+    rads = np.array(list(np.max(np.abs(poses[:, :3, 3]), axis=0)) + [1])
     hwf = c2w[:,4:5]
     # --
-    c = np.dot(c2w[:3,:4], np.array([np.random.rand() * 2 - 1, np.random.rand() * 2 - 1, np.random.rand() * 2 - 1, 1.]) * rads) 
-    z = normalize(c - np.dot(c2w[:3,:4], np.array([0,0,-0.85*focal, 1.]))) # this 0.85 is manually tuned to cover all training poses
+    mins_o, maxs_o = get_bbox(poses[:, :3, 3]) # origins
+    mins_d, maxs_d = get_bbox(poses[:, :3, 2]) # directions
+    
+    # scheme 1
+    # c = np.dot(c2w[:3,:4], np.array([np.random.rand() * 2 - 1, np.random.rand() * 2 - 1, np.random.rand() * 2 - 1, 1.]) * rads) 
+    # z = normalize(c - np.dot(c2w[:3,:4], np.array([0,0,-0.85*focal, 1.]))) # this 0.85 is manually tuned to cover all training poses
+    
+    # scheme 2: this is more random and targeted
+    c = np.dot(c2w[:3,:4], np.array([rand_uniform(mins_o[0], maxs_o[0], scale=1.1), rand_uniform(mins_o[1], maxs_o[1], scale=1.1), rand_uniform(mins_o[2], maxs_o[2], scale=1.1), 1]))
+    z = np.dot(c2w[:3,:4], np.array([rand_uniform(mins_d[0], maxs_d[0], scale=1.1), rand_uniform(mins_d[1], maxs_d[1], scale=1.1), rand_uniform(mins_d[2], maxs_d[2], scale=1.1), 1]))
+    z = normalize(z)
     pose = np.concatenate([viewmatrix(z, up, c), hwf], 1)
     return to_tensor(pose)
 
+# @mst
+def get_bbox(array):
+    '''get the bounding box of a bunch of points in 3d space'''
+    array = np.array(array)
+    assert len(array.shape) == 2 and array.shape[1] == 3 # shape should be [N, 3]
+    mins, maxs = np.min(array, axis=0), np.max(array, axis=0)
+    return mins, maxs
+
+def rand_uniform(left, right, scale=1):
+    assert right > left
+    middle = (left + right) * 0.5
+    left = middle - (right - left) * scale * 0.5
+    right = 2 * middle - left
+    return np.random.rand() * (right - left) + left
 
 def recenter_poses(poses):
     # @mst: poses shape: [n_img, 3, 5]
@@ -218,8 +235,6 @@ def recenter_poses(poses):
 
 
 #####################
-
-
 def spherify_poses(poses, bds):
     
     p34_to_44 = lambda p : np.concatenate([p, np.tile(np.reshape(np.eye(4)[-1,:], [1,1,4]), [p.shape[0], 1,1])], 1)
@@ -280,8 +295,6 @@ def spherify_poses(poses, bds):
     
 
 def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=False, path_zflat=False, n_pose_video=120):
-    
-
     poses, bds, imgs = _load_data(basedir, factor=factor) # factor=8 downsamples original imgs by 8x
     print('Loaded', basedir, bds.min(), bds.max()) # @mst, room: 10.706691140704915 91.66782174279389
     
@@ -301,9 +314,6 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     # rescale to make the min of bds to 1/0.75, far of bds is around 5+~11+. 
     # poses: [41, 3, 5], bds: [41, 2]
     # --
-
-    # @mst: used to pass local variables. I know it's ugly...
-    global GLOBALS; GLOBALS = {}
 
     if recenter:
         poses = recenter_poses(poses)
@@ -331,8 +341,7 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
         shrink_factor = .8
         zdelta = close_depth * .2
         tt = poses[:,:3,3] # ptstocam(poses[:3,3,:].T, c2w).T
-        rads = np.percentile(np.abs(tt), 90, 0) # @mst: sort postions 
-        GLOBALS['max_rads'] = np.array(list(np.max(np.abs(tt), axis=0)) + [1])
+        rads = np.percentile(np.abs(tt), 90, 0) # @mst: sort postions in ascending order, pick the 90%
         c2w_path = c2w
         N_views = n_pose_video
         N_rots = 2
@@ -346,39 +355,29 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
 
         # Generate poses for spiral path
         up = normalize(poses[:, :3, 1].sum(0))
+        # -- @mst: set globals for later use. I know it's ugly...
+        global GLOBALS; GLOBALS = {}
+        GLOBALS['c2w'] = c2w
+        GLOBALS['up'] = up
+        GLOBALS['rads'] = rads
+        GLOBALS['focal'] = focal
+        GLOBALS['poses'] = poses # @mst: will be used later
+        # --
         render_poses = render_path_spiral(c2w_path, up, rads, focal, zdelta, zrate=.5, rots=N_rots, N=N_views)
-        # import pdb; pdb.set_trace()
 
     render_poses = np.array(render_poses).astype(np.float32)
 
-    # -- @mst: plot for understanding, very helpful!
-    from mpl_toolkits import mplot3d
-    import matplotlib.pyplot as plt
-    import pickle
-    fig = plt.figure()
-    ax3d = plt.axes(projection='3d')
-    xyz_poses, xyz_render_poses = poses[:, :3, 3], render_poses[:, :3, 3]
-    ax3d.scatter3D(xyz_poses[:, 0], xyz_poses[:, 1], xyz_poses[:, 2], cmap='Greens')
-    ax3d.scatter3D(xyz_render_poses[:, 0], xyz_render_poses[:, 1], xyz_render_poses[:, 2], cmap='Reds')
-    # ax3d.plot3D(xyz_poses[:, 0], xyz_poses[:, 1], xyz_poses[:, 2]) # connect the dots
-    # ax3d.plot3D(xyz_render_poses[:, 0], xyz_render_poses[:, 1], xyz_render_poses[:, 2])
-    ax3d.scatter3D(0, 0, 0, marker='d', color='red')
-    ax3d.set_xlim([-1, 1]); ax3d.set_ylim([-1, 1]); ax3d.set_zlim([-1, 1])
-    ax3d.set_xlim([-1, 1]); ax3d.set_ylim([-1, 1]); ax3d.set_zlim([-1, 1])
-    ax3d.set_xlabel('X axis'); ax3d.set_ylabel('Y axis'); ax3d.set_zlabel('Z axis')
-    pickle.dump(fig, open('ray_origin_scatters_dataposes_vs_videoposes_llff.fig.pickle', 'wb'))
-    fig.savefig('ray_origin_scatters_dataposes_vs_videoposes_llff.pdf', dpi=50)
+    # -- @mst: plot origins and dirs for understanding
+    cmaps = ['Greens', 'Reds']
+    xyzs = [(poses[:, 0, 3], poses[:, 1, 3], poses[:, 2, 3]), 
+            (render_poses[:, 0, 3], render_poses[:, 1, 3], render_poses[:, 2, 3])]
+    savepath = f'ray_origin_scatters_dataposes_vs_videoposes_llff.pdf'
+    visualize_3d(xyzs, savepath=savepath, cmaps=cmaps)
 
-    fig = plt.figure()
-    ax3d = plt.axes(projection='3d')
-    dir_poses, dir_render_poses = poses[:, :3, 2], render_poses[:, :3, 2]
-    ax3d.scatter3D(dir_poses[:, 0], dir_poses[:, 1], dir_poses[:, 2], cmap='Greens')
-    ax3d.scatter3D(1.2* dir_render_poses[:, 0], 1.2* dir_render_poses[:, 1], 1.2* dir_render_poses[:, 2], cmap='Reds')
-    ax3d.scatter3D(0, 0, 0, marker='d', color='red')
-    ax3d.set_xlim([-1, 1]); ax3d.set_ylim([-1, 1]); ax3d.set_zlim([-1, 1])
-    ax3d.set_xlabel('X axis'); ax3d.set_ylabel('Y axis'); ax3d.set_zlabel('Z axis')
-    pickle.dump(fig, open('ray_dir_scatters_dataposes_vs_videoposes_llff.fig.pickle', 'wb'))
-    fig.savefig('ray_dir_scatters_dataposes_vs_videoposes_llff.pdf', dpi=50)
+    xyzs = [(poses[:, 0, 2], poses[:, 1, 2], poses[:, 2, 2]), 
+            (1.2*render_poses[:, 0, 2], 1.2*render_poses[:, 1, 2], 1.2*render_poses[:, 2, 2])]
+    savepath = f'ray_dir_scatters_dataposes_vs_videoposes_llff.pdf'
+    visualize_3d(xyzs, savepath=savepath, cmaps=cmaps)
     # --
 
     c2w = poses_avg(poses)
@@ -392,5 +391,4 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     images = images.astype(np.float32)
     poses = poses.astype(np.float32)
 
-    # import pdb; pdb.set_trace()
     return to_tensor(images), to_tensor(poses), to_tensor(bds), to_tensor(render_poses), i_test
