@@ -57,10 +57,8 @@ def _minify(basedir, factors=[], resolutions=[]):
             check_output('rm {}/*.{}'.format(imgdir, ext), shell=True)
             print('Removed duplicates')
         print('Done')
-            
-        
-        
-        
+
+
 def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
     
     poses_arr = np.load(os.path.join(basedir, 'poses_bounds.npy')) # shape [20, 17]
@@ -119,16 +117,13 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
     print('Loaded image data', imgs.shape, poses[:,-1,0]) # imgs.shape (378, 504, 3, 20)
     return poses, bds, imgs
 
-    
-            
-            
-    
 
 def normalize(x):
     return x / np.linalg.norm(x)
 
+
 def viewmatrix(z, up, pos):
-    vec2 = normalize(z)
+    vec2 = normalize(z) # @mst: 
     # vec1_avg = up
     # vec0 = normalize(np.cross(vec1_avg, vec2))
     vec0 = normalize(np.cross(up, vec2)) # @mst: replace above with this neat line; shape (3,)
@@ -136,9 +131,11 @@ def viewmatrix(z, up, pos):
     m = np.stack([vec0, vec1, vec2, pos], 1)
     return m
 
+
 def ptstocam(pts, c2w):
     tt = np.matmul(c2w[:3,:3].T, (pts-c2w[:3,3])[...,np.newaxis])[...,0]
     return tt
+
 
 def poses_avg(poses):
     hwf = poses[0, :3, -1:]
@@ -149,26 +146,28 @@ def poses_avg(poses):
     return c2w
 
 
-
 def render_path_spiral(c2w, up, rads, focal, zdelta, zrate, rots, N):
-    '''@mst: zrate=0.5, rots=2
-    '''
+    '''@mst: zrate = 0.5, rots = 2'''
     render_poses = []
-    rads = np.array(list(rads) + [1.])
+    rads = np.array(list(rads) + [1.]) # 
     hwf = c2w[:,4:5]
     
     # -- @mst: set globals for later use
-    global GLOBALS; GLOBALS = {}
     GLOBALS['c2w'] = c2w
     GLOBALS['up'] = up
     GLOBALS['rads'] = rads
     GLOBALS['focal'] = focal
     # --
     for theta in np.linspace(0., 2. * np.pi * rots, N+1)[:-1]:
-        c = np.dot(c2w[:3,:4], np.array([np.cos(theta), -np.sin(theta), -np.sin(theta*zrate), 1.]) * rads) 
-        z = normalize(c - np.dot(c2w[:3,:4], np.array([0,0,-focal, 1.]))) # @mst: depth?
+        c = np.dot(c2w[:3,:4], np.array([np.cos(theta), -np.sin(theta), -np.sin(theta*zrate), 1.]) * rads)
+        # @mst: above is equivalent to matrix mul: [3, 4] @ [4, 1]
+        z = normalize(c - np.dot(c2w[:3,:4], np.array([0, 0, -focal, 1.]))) # @mst: why use extra focal instead of the focal in poses?
         render_poses.append(np.concatenate([viewmatrix(z, up, c), hwf], 1))
+    
+    # @mst: try our random poses
+    render_poses = [get_rand_pose_v2().data.cpu().numpy() for _ in range(N)]
     return render_poses
+
 
 # @mst
 def get_rand_pose():
@@ -180,21 +179,40 @@ def get_rand_pose():
     theta1, theta2 = 0, 2. * np.pi * rots
     theta = theta1 + np.random.rand() * (theta2 - theta1)
     c = np.dot(c2w[:3,:4], np.array([np.cos(theta), -np.sin(theta), -np.sin(theta*zrate), 1.]) * rads) 
-    z = normalize(c - np.dot(c2w[:3,:4], np.array([0,0,-focal, 1.]))) # @mst: depth?
+    z = normalize(c - np.dot(c2w[:3,:4], np.array([0,0,-focal, 1.])))
+    pose = np.concatenate([viewmatrix(z, up, c), hwf], 1)
+    return to_tensor(pose)
+
+
+# @mst: prior version does not work well
+def get_rand_pose_v2():
+    # -- pass local variables
+    rads, c2w, up, focal = GLOBALS['max_rads'], GLOBALS['c2w'], GLOBALS['up'], GLOBALS['focal']
+    hwf = c2w[:,4:5]
+    # --
+    c = np.dot(c2w[:3,:4], np.array([np.random.rand() * 2 - 1, np.random.rand() * 2 - 1, np.random.rand() * 2 - 1, 1.]) * rads) 
+    z = normalize(c - np.dot(c2w[:3,:4], np.array([0,0,-0.85*focal, 1.]))) # this 0.85 is manually tuned to cover all training poses
     pose = np.concatenate([viewmatrix(z, up, c), hwf], 1)
     return to_tensor(pose)
 
 
 def recenter_poses(poses):
+    # @mst: poses shape: [n_img, 3, 5]
     poses_ = poses+0
     bottom = np.reshape([0,0,0,1.], [1,4])
-    c2w = poses_avg(poses)
-    c2w = np.concatenate([c2w[:3,:4], bottom], -2)
-    bottom = np.tile(np.reshape(bottom, [1,1,4]), [poses.shape[0],1,1])
-    poses = np.concatenate([poses[:,:3,:4], bottom], -2)
 
+    # get the average c2w
+    c2w = poses_avg(poses) # @mst: shape [3, 5]
+    c2w = np.concatenate([c2w[:3,:4], bottom], -2) # @mst: make it to 4x4
+    
+    # @mst: update real-world poses
+    bottom = np.tile(np.reshape(bottom, [1,1,4]), [poses.shape[0],1,1]) # @mst: [n_img, 1, 4]
+    poses = np.concatenate([poses[:,:3,:4], bottom], -2) # @mst: [n_img, 4, 4]
+
+    # @mst: tranform using average pose
     poses = np.linalg.inv(c2w) @ poses
-    poses_[:,:3,:4] = poses[:,:3,:4]
+
+    poses_[:,:3,:4] = poses[:,:3,:4] # @mst: do not change hwf, update the c2w matrix
     poses = poses_
     return poses
 
@@ -265,7 +283,7 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     
 
     poses, bds, imgs = _load_data(basedir, factor=factor) # factor=8 downsamples original imgs by 8x
-    print('Loaded', basedir, bds.min(), bds.max())
+    print('Loaded', basedir, bds.min(), bds.max()) # @mst, room: 10.706691140704915 91.66782174279389
     
     # Correct rotation matrix ordering and move variable dim to axis 0
     poses = np.concatenate([poses[:, 1:2, :], -poses[:, 0:1, :], poses[:, 2:, :]], 1)
@@ -278,13 +296,17 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     sc = 1. if bd_factor is None else 1./(bds.min() * bd_factor)
     poses[:,:3,3] *= sc
     bds *= sc
-    
+    # -- @mst: For scene 'room'
+    # import pdb; pdb.set_trace()
+    # rescale to make the min of bds to 1/0.75, far of bds is around 5+~11+. 
+    # poses: [41, 3, 5], bds: [41, 2]
+    # --
+
+    # @mst: used to pass local variables. I know it's ugly...
+    global GLOBALS; GLOBALS = {}
+
     if recenter:
-        # print(f'poses befoe recenter')
-        # print(poses) # @mst: [N, 3, 5]
         poses = recenter_poses(poses)
-        # print(f'poses after recenter')
-        # print(poses)
         
     if spherify:
         poses, render_poses, bds = spherify_poses(poses, bds)
@@ -297,7 +319,7 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
 
         ## Get spiral
         # Get average pose
-        up = normalize(poses[:, :3, 1].sum(0))
+        # up = normalize(poses[:, :3, 1].sum(0)) # @mst: move to below, more locally used
 
         # Find a reasonable "focus depth" for this dataset
         close_depth, inf_depth = bds.min()*.9, bds.max()*5.
@@ -309,7 +331,8 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
         shrink_factor = .8
         zdelta = close_depth * .2
         tt = poses[:,:3,3] # ptstocam(poses[:3,3,:].T, c2w).T
-        rads = np.percentile(np.abs(tt), 90, 0)
+        rads = np.percentile(np.abs(tt), 90, 0) # @mst: sort postions 
+        GLOBALS['max_rads'] = np.array(list(np.max(np.abs(tt), axis=0)) + [1])
         c2w_path = c2w
         N_views = n_pose_video
         N_rots = 2
@@ -322,10 +345,41 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
             N_views/=2
 
         # Generate poses for spiral path
+        up = normalize(poses[:, :3, 1].sum(0))
         render_poses = render_path_spiral(c2w_path, up, rads, focal, zdelta, zrate=.5, rots=N_rots, N=N_views)
         # import pdb; pdb.set_trace()
 
     render_poses = np.array(render_poses).astype(np.float32)
+
+    # -- @mst: plot for understanding, very helpful!
+    from mpl_toolkits import mplot3d
+    import matplotlib.pyplot as plt
+    import pickle
+    fig = plt.figure()
+    ax3d = plt.axes(projection='3d')
+    xyz_poses, xyz_render_poses = poses[:, :3, 3], render_poses[:, :3, 3]
+    ax3d.scatter3D(xyz_poses[:, 0], xyz_poses[:, 1], xyz_poses[:, 2], cmap='Greens')
+    ax3d.scatter3D(xyz_render_poses[:, 0], xyz_render_poses[:, 1], xyz_render_poses[:, 2], cmap='Reds')
+    # ax3d.plot3D(xyz_poses[:, 0], xyz_poses[:, 1], xyz_poses[:, 2]) # connect the dots
+    # ax3d.plot3D(xyz_render_poses[:, 0], xyz_render_poses[:, 1], xyz_render_poses[:, 2])
+    ax3d.scatter3D(0, 0, 0, marker='d', color='red')
+    ax3d.set_xlim([-1, 1]); ax3d.set_ylim([-1, 1]); ax3d.set_zlim([-1, 1])
+    ax3d.set_xlim([-1, 1]); ax3d.set_ylim([-1, 1]); ax3d.set_zlim([-1, 1])
+    ax3d.set_xlabel('X axis'); ax3d.set_ylabel('Y axis'); ax3d.set_zlabel('Z axis')
+    pickle.dump(fig, open('ray_origin_scatters_dataposes_vs_videoposes_llff.fig.pickle', 'wb'))
+    fig.savefig('ray_origin_scatters_dataposes_vs_videoposes_llff.pdf', dpi=50)
+
+    fig = plt.figure()
+    ax3d = plt.axes(projection='3d')
+    dir_poses, dir_render_poses = poses[:, :3, 2], render_poses[:, :3, 2]
+    ax3d.scatter3D(dir_poses[:, 0], dir_poses[:, 1], dir_poses[:, 2], cmap='Greens')
+    ax3d.scatter3D(1.2* dir_render_poses[:, 0], 1.2* dir_render_poses[:, 1], 1.2* dir_render_poses[:, 2], cmap='Reds')
+    ax3d.scatter3D(0, 0, 0, marker='d', color='red')
+    ax3d.set_xlim([-1, 1]); ax3d.set_ylim([-1, 1]); ax3d.set_zlim([-1, 1])
+    ax3d.set_xlabel('X axis'); ax3d.set_ylabel('Y axis'); ax3d.set_zlabel('Z axis')
+    pickle.dump(fig, open('ray_dir_scatters_dataposes_vs_videoposes_llff.fig.pickle', 'wb'))
+    fig.savefig('ray_dir_scatters_dataposes_vs_videoposes_llff.pdf', dpi=50)
+    # --
 
     c2w = poses_avg(poses)
     print('Data:')
@@ -338,4 +392,5 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     images = images.astype(np.float32)
     poses = poses.astype(np.float32)
 
+    # import pdb; pdb.set_trace()
     return to_tensor(images), to_tensor(poses), to_tensor(bds), to_tensor(render_poses), i_test
