@@ -14,3 +14,7 @@ tiny_nerf_data.npz
 *.txt
 *.npy
 scripts
+*.pdf
+*.pickle
+*.pkl
+tools/.ipynb_checkpoints
