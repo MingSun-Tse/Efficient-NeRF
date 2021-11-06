@@ -1,4 +1,4 @@
-import copy
+import copy, os
 import torch
 torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn 
@@ -677,3 +677,23 @@ def get_rays_np(H, W, focal, c2w):
     # Translate camera frame's origin to the world frame. It is the origin of all rays.
     rays_o = np.broadcast_to(c2w[:3,-1], np.shape(rays_d))
     return rays_o, rays_d
+
+def visualize_3d(xyzs, savepath, cmaps, connect=False, save_pickle=True, lim=False):
+    from mpl_toolkits import mplot3d
+    import matplotlib.pyplot as plt
+    import pickle
+    fig = plt.figure()
+    ax3d = plt.axes(projection='3d')
+    for ix, item in enumerate(xyzs):
+        x, y, z = item
+        ax3d.scatter3D(x, y, z, cmap=cmaps[ix])
+        if connect: 
+            ax3d.plot3D(x, y, z)
+    ax3d.scatter3D(0, 0, 0, marker='d', color='red')
+    if lim:
+        ax3d.set_xlim([-1, 1]); ax3d.set_ylim([-1, 1]); ax3d.set_zlim([-1, 1])
+    ax3d.set_xlabel('X axis'); ax3d.set_ylabel('Y axis'); ax3d.set_zlabel('Z axis')
+    if save_pickle:
+        pickle_savepath = os.path.splitext(savepath)[0] + '.fig.pickle'
+        pickle.dump(fig, open(pickle_savepath, 'wb'))
+    fig.savefig(savepath, dpi=50)

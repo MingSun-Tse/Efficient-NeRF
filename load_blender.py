@@ -5,7 +5,7 @@ import json
 import torch.nn.functional as F
 import cv2
 from torch.utils.data import Dataset
-from run_nerf_raybased_helpers import to_tensor, to8b
+from run_nerf_raybased_helpers import to_tensor, to8b, to_array, visualize_3d
 
 trans_t = lambda t : torch.Tensor([
     [1,0,0,0],
@@ -80,8 +80,23 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=Fa
     focal = .5 * W / np.tan(.5 * camera_angle_x)
     
     thetas = np.linspace(-180, 180, n_pose + 1)[:-1]
-    render_poses = torch.stack([pose_spherical(t, -30, 4) for t in thetas], 0)
+    render_poses = to_array(torch.stack([pose_spherical(t, -30, 4) for t in thetas], 0))
 
+    # -- @mst: plot origins and dirs for understanding
+    render_poses = np.array([to_array(get_rand_pose()) for _ in range(200)]) # test rand pose
+    cmaps = ['Greens', 'Reds']
+
+    savepath = 'ray_origin_scatters_dataposes_vs_videoposes_blender.pdf'
+    xyzs = [(poses[:, 0, 3], poses[:, 1, 3], poses[:, 2, 3]), 
+            (render_poses[:, 0, 3], render_poses[:, 1, 3], render_poses[:, 2, 3])]
+    visualize_3d(xyzs=xyzs, savepath=savepath, cmaps=cmaps)
+    
+    savepath = 'ray_dir_scatters_dataposes_vs_videoposes_blender.pdf'
+    xyzs = [(poses[:, 0, 2], poses[:, 1, 2], poses[:, 2, 2]),
+            (1.2*render_poses[:, 0, 2], 1.2*render_poses[:, 1, 2], 1.2*render_poses[:, 2, 2])]
+    visualize_3d(xyzs=xyzs, savepath=savepath, cmaps=cmaps)
+    # --
+    
     if half_res:
         H = H//2
         W = W//2
