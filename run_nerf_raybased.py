@@ -388,16 +388,29 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     # filename = 'model_output.png'
     # imageio.imwrite(filename, to8b(rgbs[5]))
     
+    misc = {}
     if gt_imgs is not None:
-        test_loss = img2mse(rgbs, gt_imgs[:, :H_, :W_])
-        test_psnr = mse2psnr(test_loss)
+        if args.individual_mse2psnr:
+            test_loss = to_tensor([img2mse(rgbs[i], gt_imgs[i, :H_, :W_]) for i in range(rgbs.shape[0])])
+            test_psnr = to_tensor([mse2psnr(x) for x in test_loss]).mean()
+        else:
+            test_loss = img2mse(rgbs, gt_imgs[:, :H_, :W_])
+            test_psnr = mse2psnr(test_loss)
+        misc['test_loss'] = test_loss
+        misc['test_psnr'] = test_psnr
+
         errors = torch.stack(errors, dim=0)
-    else:
-        test_loss, test_psnr, errors = None, None, None
+        misc['errors'] = errors
     
+        # -- @mst: get SSIM
+        from IW_SSIM_PyTorch import IW_SSIM, rgb2gray
+        iw_ssim = IW_SSIM(use_cuda=True)
+        ssim = iw_ssim.test(rgb2gray(reference.view(dim_w, dim_h, -1)), rgb2gray(test.view(dim_w, dim_h, -1)))
+        # --
+
     render_kwargs['network_fn'].train()
     torch.cuda.empty_cache()
-    return rgbs, disps, test_loss, test_psnr, errors
+    return rgbs, disps, misc
 
 
 def render_func(model, pose):
@@ -1196,14 +1209,14 @@ def train():
         render_kwargs_['network_fn'] = render_kwargs_train['teacher_fn'] # temporarily change the network_fn
         render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
         with torch.no_grad():
-            *_, test_loss, test_psnr, _ = render_path(test_poses, hwf, 4096, render_kwargs_, gt_imgs=test_images, render_factor=args.render_factor)
-        print(f'Teacher test: Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
+            *_, misc = render_path(test_poses, hwf, 4096, render_kwargs_, gt_imgs=test_images, render_factor=args.render_factor)
+        print(f'Teacher test: TestLoss {misc['test_loss'].item():.4f} TestPSNR {misc['test_psnr'].item():.4f}')
 
     if args.test_pretrained:
         print('Testing pretrained...')
         with torch.no_grad():
-            *_, test_loss, test_psnr,_  = render_path(test_poses, hwf, 4096, render_kwargs_test, gt_imgs=test_images, render_factor=args.render_factor)
-        print(f'Pretrained test: Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
+            *_, misc  = render_path(test_poses, hwf, 4096, render_kwargs_test, gt_imgs=test_images, render_factor=args.render_factor)
+        print(f'Pretrained test: TestLoss {misc['test_loss'].item():.4f} TestPSNR {misc['test_psnr'].item():.4f}')
 
     # @mst: use dataloader for training
     kd_poses = None
@@ -1235,7 +1248,7 @@ def train():
             if args.render_test:
                 print('Rendering test images...')
                 rgbs, *_, test_loss, test_psnr, errors = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, savedir=logger.gen_img_path, render_factor=args.render_factor)
-                print(f'[TEST] Loss {test_loss.item():.4f} PSNR {test_psnr.item():.4f}')
+                print(f'[TEST] TestLoss {test_loss.item():.4f} TestPSNR {test_psnr.item():.4f} TestSSIM {}')
             else:
                 if args.dataset_type == 'blender':
                     video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
