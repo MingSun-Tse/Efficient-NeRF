@@ -18,3 +18,4 @@ scripts
 *.pickle
 *.pkl
 tools/.ipynb_checkpoints
+log_learning_curve_test.jpg
