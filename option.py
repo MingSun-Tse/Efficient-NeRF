@@ -224,6 +224,7 @@ parser.add_argument('--lw_rgb1', type=float, default=1)
 parser.add_argument('--iter_size', type=int, default=1)
 parser.add_argument('--act', type=str, default='relu', choices=['relu', 'lrelu'], help='main activation func in a network')
 parser.add_argument('--warmup_lr', type=str, default='')
+parser.add_argument('--lpips_net', type=str, default='alex')
 
 # unet related
 parser.add_argument('--unet.ON', action='store_true')

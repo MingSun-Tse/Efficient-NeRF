@@ -20,6 +20,8 @@ from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, BlenderDataset, BlenderDataset_v2, BlenderDataset_v3, BlenderDataset_v4, get_novel_poses
 from ptflops import get_model_complexity_info
 from pruner import pruner_dict
+import lpips as lpips_
+from ssim_torch import ssim as ssim_
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
@@ -53,6 +55,10 @@ class MyDataParallel(torch.nn.DataParallel):
             return super().__getattr__(name)
         except AttributeError:
             return getattr(self.module, name)
+
+# update ssim and lpips metric functions
+ssim = lambda img, ref: ssim_(torch.unsqueeze(img, 0), torch.unsqueeze(ref, 0))
+lpips = lpips_.LPIPS(net=args.lpips_net).to(device)
 # ---------------------------------
 def square_rand_bbox(img_h, img_w, rand_crop_size):
     bbx1 = np.random.randint(0, img_w - rand_crop_size + 1)
@@ -177,7 +183,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         focal = focal / render_factor
     
     render_kwargs['network_fn'].eval()
-    rgbs, disps, errors, model_inputs = [], [], [], []
+    rgbs, disps, errors, ssims, psnrs  = [], [], [], [], []
     for i, c2w in enumerate(render_poses):
         torch.cuda.synchronize()
         t0 = time.time()
@@ -212,7 +218,6 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                     torch.cuda.synchronize(); t_forward = time.time()
                     print(f'[#{i}] frame, prepare input (embedding): {t_input - t0:.4f}s')
                     print(f'[#{i}] frame, model forward: {t_forward - t_input:.4f}s')
-                    print(f'[#{i}] frame, mean sampled point: {to_array(pts.view(pts.shape[0], -1, 3).mean(dim=1).mean(dim=0))}')
             
             elif args.model_name in ['nerf_v3.3', 'nerf_v3.5']:
                 with torch.no_grad():
@@ -366,10 +371,13 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
 
         rgbs.append(rgb)
         disps.append(disp)
-
+        
+        # @mst: various metrics
         if gt_imgs is not None:
             errors += [(rgb - gt_imgs[i][:H_, :W_, :]).abs()]
-        
+            psnrs += [mse2psnr(img2mse(rgb, gt_imgs[i, :H_, :W_]))]
+            ssims += [ssim(rgb, gt_imgs[i, :H_, :W_])]
+
         if savedir is not None:
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
             imageio.imwrite(filename, to8b(rgbs[-1]))
@@ -382,31 +390,27 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     
     rgbs = torch.stack(rgbs, dim=0)
     disps = torch.stack(disps, dim=0)
-    ## save for nerf_v3.2, will be removed
-    # np.save('model_input.npy', torch.stack(model_inputs, dim=0).data.cpu().numpy()[5])
-    # np.save('model_output.npy', rgbs.data.cpu().numpy()[5])
-    # filename = 'model_output.png'
-    # imageio.imwrite(filename, to8b(rgbs[5]))
     
+    # https://github.com/richzhang/PerceptualSimilarity
+    # LPIPS demands input shape [N, 3, H, W] and in range [-1, 1]
     misc = {}
     if gt_imgs is not None:
-        if args.individual_mse2psnr:
-            test_loss = to_tensor([img2mse(rgbs[i], gt_imgs[i, :H_, :W_]) for i in range(rgbs.shape[0])])
-            test_psnr = to_tensor([mse2psnr(x) for x in test_loss]).mean()
-        else:
-            test_loss = img2mse(rgbs, gt_imgs[:, :H_, :W_])
-            test_psnr = mse2psnr(test_loss)
-        misc['test_loss'] = test_loss
-        misc['test_psnr'] = test_psnr
+        rec = rgbs.permute(0, 3, 1, 2) # [N, 3, H, W]
+        ref = gt_imgs.permute(0, 3, 1, 2) # [N, 3, H, W]
+        rescale = lambda x, ymin, ymax: (ymax - ymin) / (x.max() - x.min()) * (x - x.min()) + ymin
+        lpipses = lpips(rescale(rec, -1, 1), rescale(ref, -1, 1)) 
 
         errors = torch.stack(errors, dim=0)
+        psnrs = torch.stack(psnrs, dim=0)
+        ssims = torch.stack(ssims, dim=0)
+        test_loss = img2mse(rgbs, gt_imgs[:, :H_, :W_]) # @mst-TODO: remove H_, W_
+        
+        misc['test_loss'] = test_loss
+        misc['test_psnr'] = mse2psnr(test_loss)
+        misc['test_psnr_v2'] = psnrs.mean()
+        misc['test_ssim'] = ssims.mean()
+        misc['test_lpips'] = lpipses.mean()
         misc['errors'] = errors
-    
-        # -- @mst: get SSIM
-        from IW_SSIM_PyTorch import IW_SSIM, rgb2gray
-        iw_ssim = IW_SSIM(use_cuda=True)
-        ssim = iw_ssim.test(rgb2gray(reference.view(dim_w, dim_h, -1)), rgb2gray(test.view(dim_w, dim_h, -1)))
-        # --
 
     render_kwargs['network_fn'].train()
     torch.cuda.empty_cache()
@@ -1210,25 +1214,27 @@ def train():
         render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
         with torch.no_grad():
             *_, misc = render_path(test_poses, hwf, 4096, render_kwargs_, gt_imgs=test_images, render_factor=args.render_factor)
-        print(f'Teacher test: TestLoss {misc['test_loss'].item():.4f} TestPSNR {misc['test_psnr'].item():.4f}')
+        print(f"Teacher test: TestLoss {misc['test_loss'].item():.4f} TestPSNR {misc['test_psnr'].item():.4f}")
 
     if args.test_pretrained:
         print('Testing pretrained...')
         with torch.no_grad():
             *_, misc  = render_path(test_poses, hwf, 4096, render_kwargs_test, gt_imgs=test_images, render_factor=args.render_factor)
-        print(f'Pretrained test: TestLoss {misc['test_loss'].item():.4f} TestPSNR {misc['test_psnr'].item():.4f}')
+        print(f"Pretrained test: TestLoss {misc['test_loss'].item():.4f} TestPSNR {misc['test_psnr'].item():.4f}")
 
     # @mst: use dataloader for training
     kd_poses = None
     if args.datadir_kd:
+        global datadir_kd
+        datadir_kd = args.datadir_kd.split(':')[1] if ':' in args.datadir_kd else args.datadir_kd
         if args.dataset_type in ['blender', 'llff']:
             pr = get_pseudo_ratio(args.pseudo_ratio_schedule, current_step=start+1)
-            trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
+            trainloader, n_total_img = get_dataloader(args.dataset_type, datadir_kd, pseudo_ratio=pr)
         else:
             raise NotImplementedError
         print(f'Loaded data. Now total #train files: {n_total_img}')
 
-    # get video_targets
+    # @mst: get video_targets
     video_targets = None
     if args.teacher_ckpt:
         t_ = time.time()
@@ -1247,21 +1253,21 @@ def train():
             t_ = time.time()
             if args.render_test:
                 print('Rendering test images...')
-                rgbs, *_, test_loss, test_psnr, errors = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, savedir=logger.gen_img_path, render_factor=args.render_factor)
-                print(f'[TEST] TestLoss {test_loss.item():.4f} TestPSNR {test_psnr.item():.4f} TestSSIM {}')
+                rgbs, *_, misc = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, savedir=logger.gen_img_path, render_factor=args.render_factor)
+                print(f"[TEST] TestPSNR {misc['test_psnr'].item():.4f} TestPSNRv2 {misc['test_psnr_v2'].item():.4f} TestSSIM {misc['test_ssim'].item():.4f} TestLPIPS {misc['test_lpips'].item():.4f}")
             else:
                 if args.dataset_type == 'blender':
                     video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
                 else:
                     video_poses = render_poses
                 print(f'Rendering video... (n_pose: {len(video_poses)})')
-                rgbs, *_, errors = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=video_targets, render_factor=args.render_factor)
+                rgbs, *_, misc = render_path(video_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=video_targets, render_factor=args.render_factor)
             t = time.time() - t_
         video_path = f'{logger.gen_img_path}/video_{expid}_iter{iter_}_{args.video_tag}.mp4'
         imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
-        if errors is not None:
-            imageio.mimwrite(video_path.replace('.mp4', '_error.mp4'), to8b(errors), fps=30, quality=8)
         print(f'Save video: "{video_path} (time: {t:.2f}s)')
+        if 'errors' in misc:
+            imageio.mimwrite(video_path.replace('.mp4', '_error.mp4'), to8b(misc['errors']), fps=30, quality=8)
         exit(0)
     
     if args.convert_to_onnx:
@@ -1370,7 +1376,7 @@ def train():
                             if args.dataset_type == 'blender':
                                 t_ = time.time()
                                 pr = get_pseudo_ratio(args.pseudo_ratio_schedule, i)
-                                trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1], pseudo_ratio=pr)
+                                trainloader, n_total_img = get_dataloader(args.dataset_type, datadir_kd, pseudo_ratio=pr)
                                 print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train files: {n_total_img}')
 
                         # get pose and target
@@ -1395,7 +1401,7 @@ def train():
                         if i % args.i_update_data == 0: # update trainloader, possibly load more data
                             if args.dataset_type in ['blender', 'llff']:
                                 t_ = time.time()
-                                trainloader, n_total_img = get_dataloader(args.dataset_type, args.datadir_kd.split(':')[1])
+                                trainloader, n_total_img = get_dataloader(args.dataset_type, datadir_kd)
                                 print(f'Iter {i}. Reloaded data (time: {time.time()-t_:.2f}s). Now total #train files: {n_total_img}')
                     
                 # get rays (rays_o, rays_d, target_s)
@@ -1673,10 +1679,10 @@ def train():
             with torch.no_grad():
                 print(f'Iter {i} Testing...')
                 t_ = time.time()
-                *_, test_loss, test_psnr, errors = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, 
+                *_, misc = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, 
                     savedir=testsavedir, render_factor=args.render_factor)
                 t_test = time.time() - t_
-            accprint(f'[TEST] Iter {i} PSNR {test_psnr.item():.4f} Train_HistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s')
+            accprint(f"[TEST] Iter {i} TestPSNR {misc['test_psnr'].item():.4f} TestPSNRv2 {misc['test_psnr_v2'].item():.4f} TestSSIM {misc['test_ssim'].item():.4f} TestLPIPS {misc['test_lpips'].item():.4f} TrainHistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s")
             print(f'Saved rendered test images: "{testsavedir}"')
             print(f'Predicted finish time: {timer()}')
 
@@ -1685,15 +1691,17 @@ def train():
             with torch.no_grad():
                 print(f'Iter {i} Rendering video... (n_pose: {len(video_poses)})')
                 t_ = time.time()
-                rgbs, disps, *_, video_loss, video_psnr, errors = render_path(video_poses, hwf, args.chunk, render_kwargs_test, 
+                rgbs, disps, misc = render_path(video_poses, hwf, args.chunk, render_kwargs_test, 
                         gt_imgs=video_targets, render_factor=args.render_factor)
                 t_video = time.time() - t_
             video_path = f'{logger.gen_img_path}/video_{ExpID}_iter{i}_{args.video_tag}.mp4'
             imageio.mimwrite(video_path, to8b(rgbs), fps=30, quality=8)
-            # imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
+            if args.model_name in ['nerf']: # @mst: raybased nerf does not predict depth right now
+                imageio.mimwrite(disp_path, to8b(disps / np.max(disps)), fps=30, quality=8)
             print(f'[VIDEO] Rendering done. Time {t_video:.2f}s. Save video: "{video_path}"')
-            if video_psnr is not None:
-                print(f'[VIDEO] video_loss {video_loss.item():.4f} video_psnr {video_psnr.item():.4f}')
+            
+            if video_targets is not None: # given ground truth, psnr will be calculated, deprecated, will be removed
+                print(f"[VIDEO] video_psnr {misc['test_psnr'].item():.4f}")
                 imageio.mimwrite(video_path.replace('.mp4', '_error.mp4'), to8b(errors), fps=30, quality=8)
 
         # save checkpoint
