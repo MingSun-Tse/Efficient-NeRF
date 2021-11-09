@@ -1,3 +1,9 @@
+# create data v8 (.npy) room
+CUDA_VISIBLE_DEVICES=0 python run_nerf_create_data.py --create_data rand --config configs/room.txt --teacher_ckpt Experiments/*-121931/weights/ckpt.tar --n_pose_kd 10000 --datadir_kd data/nerf_llff_data/room:data/nerf_llff_data/room_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__room__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data --no_rand_focal --rm_existing_data
+
+# create data v8 (.npy) fern
+CUDA_VISIBLE_DEVICES=1 python run_nerf_create_data.py --create_data rand --config configs/fern.txt --teacher_ckpt Experiments/*-121854/weights/ckpt.tar --n_pose_kd 10000 --datadir_kd data/nerf_llff_data/fern:data/nerf_llff_data/fern_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__fern__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data --no_rand_focal --rm_existing_data
+
 # create data v8 (.npy) leaves
 CUDA_VISIBLE_DEVICES=0 python run_nerf_create_data.py --create_data rand --config configs/leaves.txt --teacher_ckpt Experiments/*-125237/weights/ckpt.tar --n_pose_kd 10000 --datadir_kd data/nerf_llff_data/leaves:data/nerf_llff_data/leaves_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --screen --project nerf__leaves__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --cache_ignore data --no_rand_focal --rm_existing_data
 
