@@ -243,9 +243,14 @@ class BlenderDataset(Dataset):
 class BlenderDataset_v2(Dataset):
     '''Load data of ray origins and directions. This is the most straight way.
     '''
-    def __init__(self, datadir, dim_dir=3, dim_rgb=3, rand_crop_size=-1, img_H=0, img_W=0):
+    def __init__(self, datadir, dim_dir=3, dim_rgb=3, rand_crop_size=-1, img_H=0, img_W=0, hold_ratio=0):
         self.datadir = datadir
         all_splits = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('.npy')]
+        assert 0 <= hold_ratio < 1
+        if hold_ratio > 0:
+            left = int(len(all_splits) * (1 - hold_ratio))
+            all_splits = np.random.choice(all_splits, left)
+
         self.all_splits = all_splits
         self.dim_dir = dim_dir
         self.dim_rgb = dim_rgb
