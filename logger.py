@@ -289,7 +289,10 @@ class Logger(object):
         sys.stderr = DoubleWriter(sys.stderr, self.logtxt) # print to stderr, meanwhile, also print to logtxt
 
     def print_script(self):
-        script = 'cd %s\n' % os.path.abspath(os.getcwd())
+        script = ''
+        if hasattr(self.args, 'resume_ExpID') and self.args.resume_ExpID:
+            script += '\n\n(********************** Experiment Resumed **********************)\n'
+        script += 'cd %s\n' % os.path.abspath(os.getcwd())
         if 'CUDA_VISIBLE_DEVICES' in os.environ:
             gpu_id = os.environ['CUDA_VISIBLE_DEVICES']
             script += ' '.join(['CUDA_VISIBLE_DEVICES=%s python' % gpu_id, *sys.argv])
