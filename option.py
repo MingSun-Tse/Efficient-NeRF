@@ -242,6 +242,8 @@ parser.add_argument('--trial.inact', default='relu', choices=['none', 'relu', 'l
 parser.add_argument('--trial.outact', default='none', choices=['none', 'relu', 'lrelu'], help='the output activation func in a block')
 parser.add_argument('--trial.n_block', type=int, default=-1, help='num of block in network body')
 parser.add_argument('--trial.send_results', action='store_true')
+parser.add_argument('--trial.near', type=float, default=-1)
+parser.add_argument('--trial.far', type=float, default=-1)
 
 
 args = parser.parse_args()

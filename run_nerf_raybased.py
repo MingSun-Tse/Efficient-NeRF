@@ -1124,6 +1124,12 @@ def train():
         print('Unknown dataset type', args.dataset_type, 'exiting')
         return
     
+    # @mst
+    if hasattr(args, 'trial') and args.trial.near > 0:
+        assert args.trial.far > args.trial.near
+        near, far = args.trial.near, args.trial.far
+        print(f'Use provided near ({near}) and far {far}')
+
     # Create log dir and copy the config file
     f = f'{logger.log_path}/args.txt'
     with open(f, 'w') as file:
