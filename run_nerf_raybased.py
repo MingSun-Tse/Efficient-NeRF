@@ -182,6 +182,15 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         W = int(W / render_factor)
         focal = focal / render_factor
     
+    # for testing DONERF data
+    if gt_imgs is not None and args.given_render_path_rays:
+        loaded = torch.load(args.given_render_path_rays)
+        all_rays_o = loaded['all_rays_o'].to(device) # [N, H*W, 3]
+        all_rays_d = loaded['all_rays_d'].to(device) # [N, H*W, 3]
+        gt_imgs    = loaded['gt_imgs'].to(device) # [N, H, W, 3]
+        assert all_rays_o.shape[0] == len(render_poses)
+        print(f'Use given render_path rays: "{args.given_render_path_rays}"')
+    
     render_kwargs['network_fn'].eval()
     rgbs, disps, errors, ssims, psnrs  = [], [], [], [], []
     for i, c2w in enumerate(render_poses):
@@ -211,7 +220,10 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             
             elif args.model_name in ['nerf_v3.2']:
                 with torch.no_grad():
-                    pts = point_sampler.sample_test(c2w[:3, :4])
+                    if args.given_render_path_rays:
+                        pts = point_sampler.sample_train(all_rays_o[i], all_rays_d[i], perturb=0) # [H*W, n_sample*3]
+                    else:
+                        pts = point_sampler.sample_test(c2w[:3, :4]) # [H*W, n_sample*3]
                     model_input = positional_embedder(pts)
                     torch.cuda.synchronize(); t_input = time.time()
                     rgb = model(model_input)
