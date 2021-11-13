@@ -1,6 +1,6 @@
-expname = donerf_paper_bulldozer
+expname = donerf_paper_barbershop
 basedir = ./logs
-datadir = ./data/donerf_data/bulldozer
+datadir = ./data/donerf_data/barbershop
 dataset_type = blender
 
 no_batching = True
