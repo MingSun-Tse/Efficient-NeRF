@@ -59,6 +59,7 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=Fa
             imgs.append(imageio.imread(fname))
             poses.append(np.array(frame['transform_matrix']))
         imgs = (np.array(imgs) / 255.).astype(np.float32) # keep all 4 channels (RGBA)
+        num_channels = imgs[-1].shape[2] # @mst: for donerf data, some of them do not have A channel
         poses = np.array(poses).astype(np.float32)
         counts.append(counts[-1] + imgs.shape[0])
         all_imgs.append(imgs)
@@ -102,7 +103,7 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=Fa
         W = W//2
         focal = focal/2.
 
-        imgs_half_res = np.zeros((imgs.shape[0], H, W, 4))
+        imgs_half_res = np.zeros((imgs.shape[0], H, W, num_channels))
         for i, img in enumerate(imgs):
             imgs_half_res[i] = cv2.resize(img, (H, W), interpolation=cv2.INTER_AREA)
         imgs = imgs_half_res
