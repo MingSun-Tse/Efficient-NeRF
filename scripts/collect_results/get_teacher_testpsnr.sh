@@ -1,0 +1,7 @@
+# SERVER005
+tte DONERF_nerf__sanmiguel_S
+tte DONERF_nerf__pavillon_S
+tte DONERF_nerf__classroom_S
+tte DONERF_nerf__bulldozer_S
+tte DONERF_nerf__forest_S
+tte DONERF_nerf__barbershop_S
