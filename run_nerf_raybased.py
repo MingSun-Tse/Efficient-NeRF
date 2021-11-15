@@ -393,6 +393,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         if savedir is not None:
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
             imageio.imwrite(filename, to8b(rgbs[-1]))
+            imageio.imwrite(filename.replace('.png', '_gt.png'), to8b(gt_imgs[i])) # save gt images
             if len(errors):
                 imageio.imwrite(filename.replace('.png', '_error.png'), to8b(errors[-1]))
         
