@@ -22,6 +22,7 @@ from ptflops import get_model_complexity_info
 from pruner import pruner_dict
 import lpips as lpips_
 from ssim_torch import ssim as ssim_
+from flip_loss import FLIP; flip = FLIP()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
@@ -192,7 +193,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         print(f'Use given render_path rays: "{args.given_render_path_rays}"')
     
     render_kwargs['network_fn'].eval()
-    rgbs, disps, errors, ssims, psnrs  = [], [], [], [], []
+    rgbs, disps, errors, ssims, psnrs = [], [], [], [], []
     for i, c2w in enumerate(render_poses):
         torch.cuda.synchronize()
         t0 = time.time()
@@ -413,6 +414,15 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         rescale = lambda x, ymin, ymax: (ymax - ymin) / (x.max() - x.min()) * (x - x.min()) + ymin
         lpipses = lpips(rescale(rec, -1, 1), rescale(ref, -1, 1)) 
 
+        # -- get FLIP loss
+        # flip standard values
+        monitor_distance = 0.7
+        monitor_width = 0.7
+        monitor_resolution_x = 3840
+        pixels_per_degree = monitor_distance * (monitor_resolution_x / monitor_width) * (np.pi / 180)
+        flips = flip.compute_flip(rec, ref, pixels_per_degree) # shape [N, 1, H, W]
+        # --
+
         errors = torch.stack(errors, dim=0)
         psnrs = torch.stack(psnrs, dim=0)
         ssims = torch.stack(ssims, dim=0)
@@ -423,6 +433,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         misc['test_psnr_v2'] = psnrs.mean()
         misc['test_ssim'] = ssims.mean()
         misc['test_lpips'] = lpipses.mean()
+        misc['test_flip'] = flips.mean()
         misc['errors'] = errors
 
     render_kwargs['network_fn'].train()
@@ -1273,7 +1284,7 @@ def train():
             if args.render_test:
                 print('Rendering test images...')
                 rgbs, *_, misc = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, savedir=logger.gen_img_path, render_factor=args.render_factor)
-                print(f"[TEST] TestPSNR {misc['test_psnr'].item():.4f} TestPSNRv2 {misc['test_psnr_v2'].item():.4f} TestSSIM {misc['test_ssim'].item():.4f} TestLPIPS {misc['test_lpips'].item():.4f}")
+                print(f"[TEST] TestPSNR {misc['test_psnr'].item():.4f} TestPSNRv2 {misc['test_psnr_v2'].item():.4f} TestSSIM {misc['test_ssim'].item():.4f} TestLPIPS {misc['test_lpips'].item():.4f} TestFLIP {misc['test_flip'].item():.4f}")
             else:
                 if args.dataset_type == 'blender':
                     video_poses = get_novel_poses(args, n_pose=args.n_pose_video)
@@ -1701,7 +1712,7 @@ def train():
                 *_, misc = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, 
                     savedir=testsavedir, render_factor=args.render_factor)
                 t_test = time.time() - t_
-            accprint(f"[TEST] Iter {i} TestPSNR {misc['test_psnr'].item():.4f} TestPSNRv2 {misc['test_psnr_v2'].item():.4f} TestSSIM {misc['test_ssim'].item():.4f} TestLPIPS {misc['test_lpips'].item():.4f} TrainHistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s")
+            accprint(f"[TEST] Iter {i} TestPSNR {misc['test_psnr'].item():.4f} TestPSNRv2 {misc['test_psnr_v2'].item():.4f} TestSSIM {misc['test_ssim'].item():.4f} TestLPIPS {misc['test_lpips'].item():.4f} TestFLIP {misc['test_flip'].item():.4f} TrainHistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s")
             print(f'Saved rendered test images: "{testsavedir}"')
             print(f'Predicted finish time: {timer()}')
 
