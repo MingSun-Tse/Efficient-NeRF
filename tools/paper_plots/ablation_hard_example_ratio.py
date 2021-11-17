@@ -67,9 +67,9 @@ def plot_once(expid, logf, color, label):
         
     step = np.array(step) / xunit
     if args.mode == 'test':
-        ax.plot(step, test_psnr, label=f'{label} (test)', color=color, linestyle='dashed')
-        ax.plot(step, train_hist_psnr, label=f'{label} (train)', color=color, linestyle='solid')
-        axins.plot(step, test_psnr, color=color, linestyle='dashed')
+        ax.plot(step, test_psnr, label=f'{label} (test)', color=color, linestyle='dashed', linewidth=linewidth)
+        ax.plot(step, train_hist_psnr, label=f'{label} (train)', color=color, linestyle='solid', linewidth=linewidth)
+        axins.plot(step, test_psnr, color=color, linestyle='dashed', linewidth=linewidth)
 
 # *********************************************************************
 # put data here!!
@@ -81,9 +81,11 @@ labels = ['r=0', 'r=0.1', 'r=0.2', 'r=0.3']
 xunit = 1000
 
 # other settings
-legend_fs = 9
-xlabel_fs = 14
-ylabel_fs = 14
+legend_fs = 11
+xlabel_fs = 16
+ylabel_fs = 16
+linewidth = 1.5
+ticklabelsize = 14
 savename = f'ablation_hard_example_ratio.pdf'
 # *********************************************************************
 
@@ -99,6 +101,7 @@ axins.set_xlim(x1, x2)
 axins.set_ylim(y1, y2)
 plt.xticks(visible=False)
 plt.yticks(visible=False)
+ax.tick_params(axis='both', labelsize=ticklabelsize)
 # ******************************
 
 # get the path of log files
