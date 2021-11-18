@@ -158,7 +158,7 @@ def render_path_spiral(c2w, up, rads, focal, zdelta, zrate, rots, N):
         render_poses.append(np.concatenate([viewmatrix(z, up, c), hwf], 1))
     
     # @mst: try our random poses
-    # render_poses = [get_rand_pose_v2().data.cpu().numpy() for _ in range(N)]
+    render_poses = [get_rand_pose_v2().data.cpu().numpy() for _ in range(N)]
     return render_poses
 
 

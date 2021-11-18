@@ -679,8 +679,11 @@ def get_rays_np(H, W, focal, c2w):
     return rays_o, rays_d
 
 def visualize_3d(xyzs, savepath, cmaps, connect=False, save_pickle=True, lim=None):
-    from mpl_toolkits import mplot3d
     import matplotlib.pyplot as plt
+    # plt.style.use(['science']) # 'ieee'
+    plt.rcParams["font.family"] = "Times New Roman"
+    label_fs, ticklabelsize = 14, 9
+    from mpl_toolkits import mplot3d
     import pickle
     fig = plt.figure()
     ax3d = plt.axes(projection='3d')
@@ -692,8 +695,10 @@ def visualize_3d(xyzs, savepath, cmaps, connect=False, save_pickle=True, lim=Non
     ax3d.scatter3D(0, 0, 0, marker='d', color='red')
     if lim is not None:
         ax3d.set_xlim(lim); ax3d.set_ylim(lim); ax3d.set_zlim(lim)
-    ax3d.set_xlabel('X axis'); ax3d.set_ylabel('Y axis'); ax3d.set_zlabel('Z axis')
+    ax3d.set_xlabel('X axis', fontsize=label_fs); ax3d.set_ylabel('Y axis', fontsize=label_fs); ax3d.set_zlabel('Z axis', fontsize=label_fs)
+    ax3d.tick_params(axis='both', labelsize=ticklabelsize)
     if save_pickle:
         pickle_savepath = os.path.splitext(savepath)[0] + '.fig.pickle'
         pickle.dump(fig, open(pickle_savepath, 'wb'))
-    fig.savefig(savepath, dpi=50)
+    ax3d.grid(True, linestyle='dotted')
+    fig.savefig(savepath, bbox_inches='tight')

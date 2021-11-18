@@ -94,7 +94,7 @@ def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=Fa
     
     savepath = 'ray_dir_scatters_dataposes_vs_videoposes_blender.pdf'
     xyzs = [(poses[:, 0, 2], poses[:, 1, 2], poses[:, 2, 2]),
-            (1.2*render_poses[:, 0, 2], 1.2*render_poses[:, 1, 2], 1.2*render_poses[:, 2, 2])]
+            (render_poses[:, 0, 2], render_poses[:, 1, 2], render_poses[:, 2, 2])]
     visualize_3d(xyzs=xyzs, savepath=savepath, cmaps=cmaps)
     # --
     
