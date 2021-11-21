@@ -413,7 +413,7 @@ def render_rays(ray_batch,
 
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
 
-    ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map}
+    ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map': depth_map}
     if retraw:
         ret['raw'] = raw
     if N_importance > 0:
@@ -638,12 +638,17 @@ def train():
             # @mst: note, here it MUST be 'pose[:3,:4]', using 'pose' will cause white rgb output.
 
             batch_rays = torch.stack([rays_o, rays_d], dim=0)
-            rgb, *_ = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
+            rgb, *_, ret_dict = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
                                             verbose=False, retraw=False,
                                             **render_kwargs_)
-            
-            data_ = torch.cat([rays_o, rays_d, rgb], dim=-1) # [H, W, 9]
-            data += [data_.view(-1, 9)]
+            depth = ret_dict['depth_map'] # [H, W]
+            depth = depth[..., None]
+            if args.learn_depth:
+                data_ = torch.cat([rays_o, rays_d, rgb, depth], dim=-1) # [H, W, 10]
+                data += [data_.view(-1, 10)] 
+            else:
+                data_ = torch.cat([rays_o, rays_d, rgb], dim=-1) # [H, W, 9]
+                data += [data_.view(-1, 9)]
             print(f'[{i}/{args.n_pose_kd}] Using teacher to render more images... elapsed time: {(time.time() - t0):.2f}s')
             print(f'Predicted finish time: {timer()}')
 
