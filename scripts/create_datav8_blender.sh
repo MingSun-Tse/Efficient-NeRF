@@ -1,0 +1,3 @@
+
+# lego, with depth
+CUDA_VISIBLE_DEVICES=0 python run_nerf_create_data.py --create_data rand --config configs/lego.txt --teacher_ckpt Experiments/nerf__lego_S*/*/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages_WithDepth --screen --project nerf__lego__CreateData_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages_WithDepth --learn_depth --cache_ignore data
