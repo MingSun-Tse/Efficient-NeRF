@@ -228,7 +228,7 @@ parser.add_argument('--warmup_lr', type=str, default='')
 parser.add_argument('--lpips_net', type=str, default='alex')
 parser.add_argument('--pseudo_data_hold_ratio', type=float, default=0, help='hold a part of pseudo data, not used for training, to control sample size')
 parser.add_argument('--given_render_path_rays', type=str, default='')
-parser.add_argument('--learn_depth', action='store_true')
+parser.add_argument('--learn_depth', type=str, default='', choices=['depth', 'surface'])
 parser.add_argument('--lw_depth', type=float, default=0.1)
 
 # unet related
