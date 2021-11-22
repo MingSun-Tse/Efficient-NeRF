@@ -229,7 +229,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                     torch.cuda.synchronize(); t_input = time.time()
                     if args.learn_depth:
                         rgbd = model(model_input)
-                        rgb = rgbd[:3]
+                        rgb = rgbd[:, :3]
                     else:
                         rgb = model(model_input)
                     torch.cuda.synchronize(); t_forward = time.time()
@@ -1524,9 +1524,9 @@ def train():
                 if hard_pool_full:
                     rand_ix_out = np.random.permutation(hard_rays.shape[0])[:n_hard_out]
                     picked_hard_rays = hard_rays[rand_ix_out]
-                    rays_o   = torch.cat([rays_o,   picked_hard_rays[:,  :3]], dim=0)
-                    rays_d   = torch.cat([rays_d,   picked_hard_rays[:, 3:6]], dim=0)
-                    target_s = torch.cat([target_s, picked_hard_rays[:, 6: ]], dim=0)
+                    rays_o   = torch.cat([rays_o,   picked_hard_rays[:,          :3]], dim=0)
+                    rays_d   = torch.cat([rays_d,   picked_hard_rays[:, 3:3+DIM_DIR]], dim=0)
+                    target_s = torch.cat([target_s, picked_hard_rays[:,  3+DIM_DIR:]], dim=0)
                 
             # update data time
             data_time.update(time.time() - t0)
@@ -1556,12 +1556,7 @@ def train():
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
                 pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
-                if args.learn_depth:
-                    rgbd = model(positional_embedder(pts))
-                    rgb, depth = rgbd[:3], rgbd[3]
-                    target_s, target_depth = target_s[:3], target_s[3]
-                else:
-                    rgb = model(positional_embedder(pts))
+                rgb = model(positional_embedder(pts))
 
             elif args.model_name in ['nerf_v3.3']:
                 model = render_kwargs_train['network_fn']
@@ -1628,14 +1623,9 @@ def train():
                     rgb = model(pts)
 
             # rgb loss
-            loss_rgb = img2mse(rgb, target_s) * args.lw_rgb
+            loss_rgb = img2mse(rgb[:, :3], target_s[:, :3]) * args.lw_rgb
             psnr = mse2psnr(loss_rgb)
             loss_line.update('psnr', psnr.item(), '.4f')
-            if args.learn_depth:
-                loss_d = img2mse(depth, target_depth)
-                loss += loss_d
-                hist_depthloss = loss_d.item() if i == start + 1 else hist_depthloss * 0.95 + loss_d.item() * 0.05
-                loss_line.update('hist_depthloss', hist_depthloss, '.4f')
             if not (args.enhance_cnn and args.freeze_pretrained):
                 loss += loss_rgb
             
@@ -1664,6 +1654,14 @@ def train():
             if args.enhance_cnn:
                 hist_psnr1 = psnr1.item() if i == start + 1 else hist_psnr1 * 0.95 + psnr1.item() * 0.05
                 loss_line.update('hist_psnr1', hist_psnr1, '.4f')
+
+            # regress depth
+            if args.learn_depth:
+                loss_d = img2mse(rgb[:, 3], target_s[:, 3])
+                loss += loss_d * args.lw_depth
+                hist_depthloss = loss_d.item() if i == start + 1 else hist_depthloss * 0.95 + loss_d.item() * 0.05
+                loss_line.update(f'hist_depthloss (*{args.lw_depth})', hist_depthloss, '.4f')
+
             loss_line.update('LR', new_lrate, '.10f')
         
         # <<<<<<<<<<< inner loop (get data, forward, add loss) ends <<<<<<<<<<<
