@@ -227,7 +227,11 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                         pts = point_sampler.sample_test(c2w[:3, :4]) # [H*W, n_sample*3]
                     model_input = positional_embedder(pts)
                     torch.cuda.synchronize(); t_input = time.time()
-                    rgb = model(model_input)
+                    if args.learn_depth:
+                        rgbd = model(model_input)
+                        rgb = rgbd[:3]
+                    else:
+                        rgb = model(model_input)
                     torch.cuda.synchronize(); t_forward = time.time()
                     print(f'[#{i}] frame, prepare input (embedding): {t_input - t0:.4f}s')
                     print(f'[#{i}] frame, model forward: {t_forward - t_input:.4f}s')
@@ -497,7 +501,8 @@ def create_nerf(args, near, far):
     
     elif args.model_name in ['nerf_v3.2']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
-        model = NeRF_v3_2(args, input_dim).to(device)
+        output_dim = 4 if args.learn_depth else 3
+        model = NeRF_v3_2(args, input_dim, output_dim).to(device)
         if not args.freeze_pretrained:
             grad_vars += list(model.parameters())
 
@@ -1348,7 +1353,7 @@ def train():
 
     # training
     timer = Timer((args.N_iters - start) // args.i_testset)
-    hist_psnr = hist_psnr1 = hist_psnr2 = n_pseudo_img = n_seen_img = 0
+    hist_psnr = hist_psnr1 = hist_psnr2 = n_pseudo_img = n_seen_img = hist_depthloss = 0
     global global_step
     print('Begin training')
     hard_pool_full = False
@@ -1551,7 +1556,12 @@ def train():
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
                 pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
-                rgb = model(positional_embedder(pts))
+                if args.learn_depth:
+                    rgbd = model(positional_embedder(pts))
+                    rgb, depth = rgbd[:3], rgbd[3]
+                    target_s, target_depth = target_s[:3], target_s[3]
+                else:
+                    rgb = model(positional_embedder(pts))
 
             elif args.model_name in ['nerf_v3.3']:
                 model = render_kwargs_train['network_fn']
@@ -1621,6 +1631,11 @@ def train():
             loss_rgb = img2mse(rgb, target_s) * args.lw_rgb
             psnr = mse2psnr(loss_rgb)
             loss_line.update('psnr', psnr.item(), '.4f')
+            if args.learn_depth:
+                loss_d = img2mse(depth, target_depth)
+                loss += loss_d
+                hist_depthloss = loss_d.item() if i == start + 1 else hist_depthloss * 0.95 + loss_d.item() * 0.05
+                loss_line.update('hist_depthloss', hist_depthloss, '.4f')
             if not (args.enhance_cnn and args.freeze_pretrained):
                 loss += loss_rgb
             

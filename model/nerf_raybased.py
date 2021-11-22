@@ -579,7 +579,7 @@ def get_activation(act):
     
 class NeRF_v3_2(nn.Module):
     '''Based on NeRF_v3, move positional embedding out'''
-    def __init__(self, args, input_dim):
+    def __init__(self, args, input_dim, output_dim):
         super(NeRF_v3_2, self).__init__()
         self.args = args
         D, W = args.netdepth, args.netwidth
@@ -622,7 +622,7 @@ class NeRF_v3_2(nn.Module):
         self.body = nn.Sequential(*body)
         
         # tail
-        self.tail = nn.Linear(input_dim, 3) if args.linear_tail else nn.Sequential(*[nn.Linear(Ws[D-2], 3), nn.Sigmoid()])
+        self.tail = nn.Linear(input_dim, output_dim) if args.linear_tail else nn.Sequential(*[nn.Linear(Ws[D-2], output_dim), nn.Sigmoid()])
     
     def forward(self, x): # x: embedded position coordinates
         x = self.head(x)
