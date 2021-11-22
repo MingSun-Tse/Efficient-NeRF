@@ -501,12 +501,7 @@ def create_nerf(args, near, far):
     
     elif args.model_name in ['nerf_v3.2']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
-        if args.learn_depth:
-            assert args.dim_rgb == 4
-            output_dim = 4
-        else:
-            output_dim = 3
-        model = NeRF_v3_2(args, input_dim, output_dim).to(device)
+        model = NeRF_v3_2(args, input_dim, args.dim_rgb).to(device)
         if not args.freeze_pretrained:
             grad_vars += list(model.parameters())
 
@@ -1661,7 +1656,7 @@ def train():
 
             # regress depth
             if args.learn_depth:
-                loss_d = img2mse(rgb[:, 3], target_s[:, 3])
+                loss_d = img2mse(rgb[:, 3:], target_s[:, 3:])
                 loss += loss_d * args.lw_depth
                 hist_depthloss = loss_d.item() if i == start + 1 else hist_depthloss * 0.95 + loss_d.item() * 0.05
                 loss_line.update(f'hist_depthloss (*{args.lw_depth})', hist_depthloss, '.4f')
