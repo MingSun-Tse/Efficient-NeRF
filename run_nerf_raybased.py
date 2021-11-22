@@ -501,7 +501,11 @@ def create_nerf(args, near, far):
     
     elif args.model_name in ['nerf_v3.2']:
         input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
-        output_dim = 4 if args.learn_depth else 3
+        if args.learn_depth:
+            assert args.dim_rgb == 4
+            output_dim = 4
+        else:
+            output_dim = 3
         model = NeRF_v3_2(args, input_dim, output_dim).to(device)
         if not args.freeze_pretrained:
             grad_vars += list(model.parameters())
