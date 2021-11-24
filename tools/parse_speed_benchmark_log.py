@@ -9,11 +9,12 @@ f = sys.argv[1]
 total_time = []
 start_collecting = False
 ours = False
+num_frames = 0
 for line in open(f):
     line = line.strip()
     if line.startswith("rendering all images (test)"): # for DONERF code
         start_collecting = True
-        num_frames = int(line.split('/')[1].split(" ")[0]) 
+        num_frames += 1
     
     if "Rendering video..." in line: # for our code
         start_collecting = True
