@@ -183,228 +183,274 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         W = int(W / render_factor)
         focal = focal / render_factor
     
+    render_kwargs['network_fn'].eval()
+    rgbs, disps, errors, ssims, psnrs = [], [], [], [], []
+
     # for testing DONERF data
-    if gt_imgs is not None and args.given_render_path_rays:
+    if args.given_render_path_rays:
         loaded = torch.load(args.given_render_path_rays)
         all_rays_o = loaded['all_rays_o'].to(device) # [N, H*W, 3]
         all_rays_d = loaded['all_rays_d'].to(device) # [N, H*W, 3]
-        gt_imgs    = loaded['gt_imgs'].to(device) # [N, H, W, 3]
-        assert all_rays_o.shape[0] == len(render_poses)
+        if 'gt_imgs' in loaded:
+            gt_imgs = loaded['gt_imgs'].to(device) # [N, H, W, 3]
         print(f'Use given render_path rays: "{args.given_render_path_rays}"')
+
+        model = render_kwargs['network_fn']
+        for i in range(len(all_rays_o)):
+            torch.cuda.synchronize()
+            t0 = time.time()
+            with torch.no_grad():
+                pts = point_sampler.sample_train(all_rays_o[i], all_rays_d[i], perturb=0) # [H*W, n_sample*3]
+                model_input = positional_embedder(pts)
+                torch.cuda.synchronize(); t_input = time.time()
+                if args.learn_depth:
+                    rgbd = model(model_input)
+                    rgb = rgbd[:, :3]
+                else:
+                    rgb = model(model_input)
+                torch.cuda.synchronize(); t_forward = time.time()
+                print(f'[#{i}] frame, prepare input (embedding): {t_input - t0:.4f}s')
+                print(f'[#{i}] frame, model forward: {t_forward - t_input:.4f}s')
     
-    render_kwargs['network_fn'].eval()
-    rgbs, disps, errors, ssims, psnrs = [], [], [], [], []
-    for i, c2w in enumerate(render_poses):
-        torch.cuda.synchronize()
-        t0 = time.time()
-        print(f'[#{i}] frame, rendering begins')
-        if args.model_name in ['nerf']:
-            rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs) 
-            H_, W_ = H, W
-        
-        else: # for our raybased nerf
-            model = render_kwargs['network_fn']
-            perturb = render_kwargs['perturb']
+                # reshape to image
+                if args.dataset_type == 'llff':
+                    H_, W_ = H, W # non-square images
+                elif args.dataset_type == 'blender':
+                    H_ = W_ = int(math.sqrt(rgb.numel() / 3))
+                rgb = rgb.view(H_, W_, 3)
+                disp = rgb # placeholder, to maintain compability
 
-            # get rays_o and rays_d
-            if args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v4', 'nerf_v3.4.2', 'nerf_v3.6', 'nerf_v3.7', 'nerf_v3.8']:
-                rays_o, rays_d = get_rays1(H, W, focal, c2w[:3, :4]) # [H, W, 3]
-                rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3) # [H*W, 3]
+                rgbs.append(rgb)
+                disps.append(disp)
 
-            # network forward
-            if args.model_name in ['nerf_v2', 'nerf_v3']:
-                with torch.no_grad():
-                    rgb = 0
-                    for _ in range(args.render_iters):
-                        rgb += model(rays_o, rays_d, perturb=perturb)[0]
-                    rgb /= args.render_iters
+                # @mst: various metrics
+                if gt_imgs is not None:
+                    errors += [(rgb - gt_imgs[i][:H_, :W_, :]).abs()]
+                    psnrs += [mse2psnr(img2mse(rgb, gt_imgs[i, :H_, :W_]))]
+                    ssims += [ssim(rgb, gt_imgs[i, :H_, :W_])]
+
+                if savedir is not None:
+                    filename = os.path.join(savedir, '{:03d}.png'.format(i))
+                    imageio.imwrite(filename, to8b(rgbs[-1]))
+                    imageio.imwrite(filename.replace('.png', '_gt.png'), to8b(gt_imgs[i])) # save gt images
+                    if len(errors):
+                        imageio.imwrite(filename.replace('.png', '_error.png'), to8b(errors[-1]))
+                
+                torch.cuda.synchronize()
+                print(f'[#{i}] frame, rendering done, time for this frame: {time.time()-t0:.4f}s')
+                print('')
+    else:
+        for i, c2w in enumerate(render_poses):
+            torch.cuda.synchronize()
+            t0 = time.time()
+            print(f'[#{i}] frame, rendering begins')
+            if args.model_name in ['nerf']:
+                rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs) 
+                H_, W_ = H, W
             
-            elif args.model_name in ['nerf_v3.2']:
-                with torch.no_grad():
-                    if args.given_render_path_rays:
-                        pts = point_sampler.sample_train(all_rays_o[i], all_rays_d[i], perturb=0) # [H*W, n_sample*3]
-                    else:
-                        pts = point_sampler.sample_test(c2w[:3, :4]) # [H*W, n_sample*3]
-                    model_input = positional_embedder(pts)
-                    torch.cuda.synchronize(); t_input = time.time()
-                    if args.learn_depth:
-                        rgbd = model(model_input)
-                        rgb = rgbd[:, :3]
-                    else:
-                        rgb = model(model_input)
-                    torch.cuda.synchronize(); t_forward = time.time()
-                    print(f'[#{i}] frame, prepare input (embedding): {t_input - t0:.4f}s')
-                    print(f'[#{i}] frame, model forward: {t_forward - t_input:.4f}s')
-            
-            elif args.model_name in ['nerf_v3.3', 'nerf_v3.5']:
-                with torch.no_grad():
-                    model_input = positional_embedder(point_sampler.sample_test(c2w))
-                    rgb = model.forward_mlp2(model_input, img_h=H, img_w=W)
+            else: # for our raybased nerf
+                model = render_kwargs['network_fn']
+                perturb = render_kwargs['perturb']
 
-            elif args.model_name in ['nerf_v3.4']:
-                with torch.no_grad():
-                    pts = point_sampler.sample_test2(c2w) # [H*W, n_sample, 3]
-                    pts = pts.view(H, W, args.n_sample_per_ray, 3) # [H, W, n_sample, 3]
-                    pts = positional_embedder.embed(pts) # [H, W, n_sample, 3, 2L+1]
-                    pts = pts.view(*pts.shape[:2], -1) # [H, W, -1]
-                    patch_size = args.scale
-                    num_h, num_w = H // patch_size, W // patch_size
-                    model_input = []
-                    torch.cuda.synchronize()
-                    t1 = time.time()
-                    for h_ix in range(num_h):
-                        for w_ix in range(num_w):
-                             patch = pts[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size, ...] # [3, 3, -1]
-                             model_input += [patch]
-                    model_input = torch.stack(model_input, dim=0) # [n_patch, 3, 3 , -1]
-                    model_input = model_input.view(model_input.shape[0], -1)
-                    torch.cuda.synchronize()
-                    print(f'data prepare {time.time()-t1:.4f}s')
-                    # model_input = torch.ones((H//args.scale)*(W//args.scale), args.scale*args.scale*args.n_sample_per_ray*3*21).to(device)
-                    torch.cuda.synchronize()
-                    t1 = time.time()
-                    rgb = model(model_input) # [n_patch, 27]
-                    torch.cuda.synchronize()
-                    print(f'model forward {time.time() - t1:.4f}s')
+                # get rays_o and rays_d
+                if args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v4', 'nerf_v3.4.2', 'nerf_v3.6', 'nerf_v3.7', 'nerf_v3.8']:
+                    rays_o, rays_d = get_rays1(H, W, focal, c2w[:3, :4]) # [H, W, 3]
+                    rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3) # [H*W, 3]
 
-            elif args.model_name in ['nerf_v3.4.2', 'nerf_v3.6', 'nerf_v3.7']:
-                with torch.no_grad():
-                    patch_size = args.scale
-                    rays_o, rays_d = rays_o.view(H, W, 3), rays_d.view(H, W, 3)
-                    num_h, num_w = H // patch_size, W // patch_size
-                    
-                    torch.cuda.synchronize()
-                    t11 = time.time()
-                    model_input = []
-                    for h_ix in range(num_h):
-                        for w_ix in range(num_w):
-                            rays_o_patch = rays_o[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size] # [3, 3, 3]
-                            rays_d_patch = rays_d[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size] # [3, 3, 3]
-                            rays_o_patch = rays_o_patch.reshape([1, -1]) # [1, 27]
-                            rays_d_patch = rays_d_patch.reshape([1, -1]) # [1, 27]
-                            pts = point_sampler.sample_train(rays_o_patch, rays_d_patch, perturb=0.) # [1, 9*n_sample*3]
-                            pts = positional_embedder(pts)[0] # [1, 9*n_sample*3*embed_dim]
-                            model_input += [pts]
-                    torch.cuda.synchronize()
-                    print(f'prepare input: {time.time() - t11:.4f}s')
-                    
-                    # forward in batch    
-                    model_input = torch.stack(model_input, dim=0) # [n_ray, 9*n_sample*3*embed_dim]
-                    torch.cuda.synchronize()
-                    t11 = time.time()
-                    rgb_patches = model(model_input) # [n_ray, 27]
+                # network forward
+                if args.model_name in ['nerf_v2', 'nerf_v3']:
+                    with torch.no_grad():
+                        rgb = 0
+                        for _ in range(args.render_iters):
+                            rgb += model(rays_o, rays_d, perturb=perturb)[0]
+                        rgb /= args.render_iters
+                
+                elif args.model_name in ['nerf_v3.2']:
+                    with torch.no_grad():
+                        if args.given_render_path_rays:
+                            pts = point_sampler.sample_train(all_rays_o[i], all_rays_d[i], perturb=0) # [H*W, n_sample*3]
+                        else:
+                            pts = point_sampler.sample_test(c2w[:3, :4]) # [H*W, n_sample*3]
+                        model_input = positional_embedder(pts)
+                        torch.cuda.synchronize(); t_input = time.time()
+                        if args.learn_depth:
+                            rgbd = model(model_input)
+                            rgb = rgbd[:, :3]
+                        else:
+                            rgb = model(model_input)
+                        torch.cuda.synchronize(); t_forward = time.time()
+                        print(f'[#{i}] frame, prepare input (embedding): {t_input - t0:.4f}s')
+                        print(f'[#{i}] frame, model forward: {t_forward - t_input:.4f}s')
+                
+                elif args.model_name in ['nerf_v3.3', 'nerf_v3.5']:
+                    with torch.no_grad():
+                        model_input = positional_embedder(point_sampler.sample_test(c2w))
+                        rgb = model.forward_mlp2(model_input, img_h=H, img_w=W)
 
-                    torch.cuda.synchronize()
-                    print(f'model forward: {time.time() - t11:.4f}s')
+                elif args.model_name in ['nerf_v3.4']:
+                    with torch.no_grad():
+                        pts = point_sampler.sample_test2(c2w) # [H*W, n_sample, 3]
+                        pts = pts.view(H, W, args.n_sample_per_ray, 3) # [H, W, n_sample, 3]
+                        pts = positional_embedder.embed(pts) # [H, W, n_sample, 3, 2L+1]
+                        pts = pts.view(*pts.shape[:2], -1) # [H, W, -1]
+                        patch_size = args.scale
+                        num_h, num_w = H // patch_size, W // patch_size
+                        model_input = []
+                        torch.cuda.synchronize()
+                        t1 = time.time()
+                        for h_ix in range(num_h):
+                            for w_ix in range(num_w):
+                                patch = pts[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size, ...] # [3, 3, -1]
+                                model_input += [patch]
+                        model_input = torch.stack(model_input, dim=0) # [n_patch, 3, 3 , -1]
+                        model_input = model_input.view(model_input.shape[0], -1)
+                        torch.cuda.synchronize()
+                        print(f'data prepare {time.time()-t1:.4f}s')
+                        # model_input = torch.ones((H//args.scale)*(W//args.scale), args.scale*args.scale*args.n_sample_per_ray*3*21).to(device)
+                        torch.cuda.synchronize()
+                        t1 = time.time()
+                        rgb = model(model_input) # [n_patch, 27]
+                        torch.cuda.synchronize()
+                        print(f'model forward {time.time() - t1:.4f}s')
 
-                    torch.cuda.synchronize()
-                    t11 = time.time()
-                    rgb, cnt = torch.zeros(num_h * patch_size, num_w * patch_size, 3).cuda(), -1
-                    for h_ix in range(num_h):
-                        for w_ix in range(num_w):
-                            cnt += 1
-                            rgb_ = rgb_patches[cnt].view(patch_size, patch_size, 3) # [3, 3, 3]
-                            rgb[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size, :] = rgb_
+                elif args.model_name in ['nerf_v3.4.2', 'nerf_v3.6', 'nerf_v3.7']:
+                    with torch.no_grad():
+                        patch_size = args.scale
+                        rays_o, rays_d = rays_o.view(H, W, 3), rays_d.view(H, W, 3)
+                        num_h, num_w = H // patch_size, W // patch_size
+                        
+                        torch.cuda.synchronize()
+                        t11 = time.time()
+                        model_input = []
+                        for h_ix in range(num_h):
+                            for w_ix in range(num_w):
+                                rays_o_patch = rays_o[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size] # [3, 3, 3]
+                                rays_d_patch = rays_d[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size] # [3, 3, 3]
+                                rays_o_patch = rays_o_patch.reshape([1, -1]) # [1, 27]
+                                rays_d_patch = rays_d_patch.reshape([1, -1]) # [1, 27]
+                                pts = point_sampler.sample_train(rays_o_patch, rays_d_patch, perturb=0.) # [1, 9*n_sample*3]
+                                pts = positional_embedder(pts)[0] # [1, 9*n_sample*3*embed_dim]
+                                model_input += [pts]
+                        torch.cuda.synchronize()
+                        print(f'prepare input: {time.time() - t11:.4f}s')
+                        
+                        # forward in batch    
+                        model_input = torch.stack(model_input, dim=0) # [n_ray, 9*n_sample*3*embed_dim]
+                        torch.cuda.synchronize()
+                        t11 = time.time()
+                        rgb_patches = model(model_input) # [n_ray, 27]
 
-                    torch.cuda.synchronize()
-                    print(f'prepare output: {time.time() - t11:.4f}s')
+                        torch.cuda.synchronize()
+                        print(f'model forward: {time.time() - t11:.4f}s')
 
-            elif args.model_name in ['nerf_v3.8']:
-                with torch.no_grad():
-                    patch_size = 16
-                    rays_o, rays_d = rays_o.view(H, W, 3), rays_d.view(H, W, 3)
-                    num_h, num_w = H // patch_size, W // patch_size
-                    
-                    torch.cuda.synchronize()
-                    t11 = time.time()
-                    rays_o_patch, rays_d_patch = [], []
-                    for h_ix in range(num_h):
-                        for w_ix in range(num_w):
-                            rays_o_patch += [rays_o[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size]] # [patch_size, patch_size, 3]
-                            rays_d_patch += [rays_d[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size]] # [patch_size, patch_size, 3]
-                    rays_o_patch = torch.stack(rays_o_patch, dim=0) # [n_patch, patch_size, patch_size, 3]
-                    rays_d_patch = torch.stack(rays_d_patch, dim=0) # [n_patch, patch_size, patch_size, 3]
-                    pts = point_sampler.sample_train_cnnstyle(rays_o_patch, rays_d_patch, perturb=0.) # [n_patch, patch_size, patch_size, 16, 3]
-                    pts = positional_embedder.embed_cnnstyle(pts) # [n_patch, patch_size, patch_size, 16, 3, 2L+1]
-                    pts = pts.view(*pts.shape[:3], -1)
-                    model_input = pts.permute(0, 3, 1, 2)
-                    torch.cuda.synchronize()
-                    print(f'prepare input: {time.time() - t11:.4f}s')
-                    
-                    # forward in batch    
-                    torch.cuda.synchronize()
-                    t11 = time.time()
-                    rgb_patches = model(model_input) # [n_patch, 3, patch_size, patch_size]
-                    torch.cuda.synchronize()
-                    print(f'model forward: {time.time() - t11:.4f}s')
+                        torch.cuda.synchronize()
+                        t11 = time.time()
+                        rgb, cnt = torch.zeros(num_h * patch_size, num_w * patch_size, 3).cuda(), -1
+                        for h_ix in range(num_h):
+                            for w_ix in range(num_w):
+                                cnt += 1
+                                rgb_ = rgb_patches[cnt].view(patch_size, patch_size, 3) # [3, 3, 3]
+                                rgb[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size, :] = rgb_
 
-                    torch.cuda.synchronize()
-                    t11 = time.time()
-                    rgb, cnt = torch.zeros(num_h * patch_size, num_w * patch_size, 3).cuda(), -1
-                    for h_ix in range(num_h):
-                        for w_ix in range(num_w):
-                            cnt += 1
-                            rgb_ = rgb_patches[cnt].permute(1, 2, 0) # [patch_size, patch_size, 3]
-                            rgb[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size, :] = rgb_
-                    torch.cuda.synchronize()
-                    print(f'prepare output: {time.time() - t11:.4f}s')
+                        torch.cuda.synchronize()
+                        print(f'prepare output: {time.time() - t11:.4f}s')
 
-            elif args.model_name in ['nerf_v4']:
-                rays_o = torch.reshape(rays_o, (-1, args.num_shared_pixels * 3))
-                rays_d = torch.reshape(rays_d, (-1, args.num_shared_pixels * 3))
-                with torch.no_grad():
-                    rgb = model(rays_o, rays_d, rays_d2=None, scale=args.forward_scale, perturb=perturb, test=True)
-                rgb = torch.reshape(rgb, (H, W, 3))
-            
-            elif args.model_name in ['nerf_v6', 'nerf_v6_enhance', 'nerf_v7']:
-                model_input = positional_embedder(point_sampler.sample_test(c2w)) # [n_ray, embed_dim]
-                model_input = model_input.view(1, H, W, model_input.shape[-1])
-                model_input = model_input.permute(0, 3, 1, 2)
-                # model_input = model_input.view(1, model_input.shape[-1], H, W) # Note! mind the meaning of each axis
-                with torch.no_grad():
-                    out = model(model_input)
-                    if args.model_name in ['nerf_v6', 'nerf_v7']:
-                        rgb = out
-                    elif args.model_name in ['nerf_v6_enhance']:
-                        rgb = out[1] # [1, 3, H, W]
+                elif args.model_name in ['nerf_v3.8']:
+                    with torch.no_grad():
+                        patch_size = 16
+                        rays_o, rays_d = rays_o.view(H, W, 3), rays_d.view(H, W, 3)
+                        num_h, num_w = H // patch_size, W // patch_size
+                        
+                        torch.cuda.synchronize()
+                        t11 = time.time()
+                        rays_o_patch, rays_d_patch = [], []
+                        for h_ix in range(num_h):
+                            for w_ix in range(num_w):
+                                rays_o_patch += [rays_o[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size]] # [patch_size, patch_size, 3]
+                                rays_d_patch += [rays_d[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size]] # [patch_size, patch_size, 3]
+                        rays_o_patch = torch.stack(rays_o_patch, dim=0) # [n_patch, patch_size, patch_size, 3]
+                        rays_d_patch = torch.stack(rays_d_patch, dim=0) # [n_patch, patch_size, patch_size, 3]
+                        pts = point_sampler.sample_train_cnnstyle(rays_o_patch, rays_d_patch, perturb=0.) # [n_patch, patch_size, patch_size, 16, 3]
+                        pts = positional_embedder.embed_cnnstyle(pts) # [n_patch, patch_size, patch_size, 16, 3, 2L+1]
+                        pts = pts.view(*pts.shape[:3], -1)
+                        model_input = pts.permute(0, 3, 1, 2)
+                        torch.cuda.synchronize()
+                        print(f'prepare input: {time.time() - t11:.4f}s')
+                        
+                        # forward in batch    
+                        torch.cuda.synchronize()
+                        t11 = time.time()
+                        rgb_patches = model(model_input) # [n_patch, 3, patch_size, patch_size]
+                        torch.cuda.synchronize()
+                        print(f'model forward: {time.time() - t11:.4f}s')
+
+                        torch.cuda.synchronize()
+                        t11 = time.time()
+                        rgb, cnt = torch.zeros(num_h * patch_size, num_w * patch_size, 3).cuda(), -1
+                        for h_ix in range(num_h):
+                            for w_ix in range(num_w):
+                                cnt += 1
+                                rgb_ = rgb_patches[cnt].permute(1, 2, 0) # [patch_size, patch_size, 3]
+                                rgb[h_ix*patch_size: (h_ix+1)*patch_size, w_ix*patch_size: (w_ix+1)*patch_size, :] = rgb_
+                        torch.cuda.synchronize()
+                        print(f'prepare output: {time.time() - t11:.4f}s')
+
+                elif args.model_name in ['nerf_v4']:
+                    rays_o = torch.reshape(rays_o, (-1, args.num_shared_pixels * 3))
+                    rays_d = torch.reshape(rays_d, (-1, args.num_shared_pixels * 3))
+                    with torch.no_grad():
+                        rgb = model(rays_o, rays_d, rays_d2=None, scale=args.forward_scale, perturb=perturb, test=True)
+                    rgb = torch.reshape(rgb, (H, W, 3))
+                
+                elif args.model_name in ['nerf_v6', 'nerf_v6_enhance', 'nerf_v7']:
+                    model_input = positional_embedder(point_sampler.sample_test(c2w)) # [n_ray, embed_dim]
+                    model_input = model_input.view(1, H, W, model_input.shape[-1])
+                    model_input = model_input.permute(0, 3, 1, 2)
+                    # model_input = model_input.view(1, model_input.shape[-1], H, W) # Note! mind the meaning of each axis
+                    with torch.no_grad():
+                        out = model(model_input)
+                        if args.model_name in ['nerf_v6', 'nerf_v7']:
+                            rgb = out
+                        elif args.model_name in ['nerf_v6_enhance']:
+                            rgb = out[1] # [1, 3, H, W]
+                        rgb = rgb.permute(0, 2, 3, 1) # [1, H, W, 3]
+
+                # enhance
+                if 'network_enhance' in render_kwargs:
+                    model_enhance = render_kwargs['network_enhance']
+                    if len(rgb.shape) == 3:
+                        rgb = rgb[None, ...] # [1, H, W, 3]
+                    rgb = rgb.permute(0, 3, 1, 2)
+                    rgb = model_enhance(rgb) # [1, 3, H, W]
                     rgb = rgb.permute(0, 2, 3, 1) # [1, H, W, 3]
 
-            # enhance
-            if 'network_enhance' in render_kwargs:
-                model_enhance = render_kwargs['network_enhance']
-                if len(rgb.shape) == 3:
-                    rgb = rgb[None, ...] # [1, H, W, 3]
-                rgb = rgb.permute(0, 3, 1, 2)
-                rgb = model_enhance(rgb) # [1, 3, H, W]
-                rgb = rgb.permute(0, 2, 3, 1) # [1, H, W, 3]
+                # reshape to image
+                if args.dataset_type == 'llff':
+                    H_, W_ = H, W # non-square images
+                elif args.dataset_type == 'blender':
+                    H_ = W_ = int(math.sqrt(rgb.numel() / 3))
+                rgb = rgb.view(H_, W_, 3)
+                disp = rgb # placeholder, to maintain compability
 
-            # reshape to image
-            if args.dataset_type == 'llff':
-                H_, W_ = H, W # non-square images
-            elif args.dataset_type == 'blender':
-                H_ = W_ = int(math.sqrt(rgb.numel() / 3))
-            rgb = rgb.view(H_, W_, 3)
-            disp = rgb # placeholder, to maintain compability
+            rgbs.append(rgb)
+            disps.append(disp)
+            
+            # @mst: various metrics
+            if gt_imgs is not None:
+                errors += [(rgb - gt_imgs[i][:H_, :W_, :]).abs()]
+                psnrs += [mse2psnr(img2mse(rgb, gt_imgs[i, :H_, :W_]))]
+                ssims += [ssim(rgb, gt_imgs[i, :H_, :W_])]
 
-        rgbs.append(rgb)
-        disps.append(disp)
-        
-        # @mst: various metrics
-        if gt_imgs is not None:
-            errors += [(rgb - gt_imgs[i][:H_, :W_, :]).abs()]
-            psnrs += [mse2psnr(img2mse(rgb, gt_imgs[i, :H_, :W_]))]
-            ssims += [ssim(rgb, gt_imgs[i, :H_, :W_])]
-
-        if savedir is not None:
-            filename = os.path.join(savedir, '{:03d}.png'.format(i))
-            imageio.imwrite(filename, to8b(rgbs[-1]))
-            imageio.imwrite(filename.replace('.png', '_gt.png'), to8b(gt_imgs[i])) # save gt images
-            if len(errors):
-                imageio.imwrite(filename.replace('.png', '_error.png'), to8b(errors[-1]))
-        
-        torch.cuda.synchronize()
-        print(f'[#{i}] frame, rendering done, time for this frame: {time.time()-t0:.4f}s')
-        print('')
+            if savedir is not None:
+                filename = os.path.join(savedir, '{:03d}.png'.format(i))
+                imageio.imwrite(filename, to8b(rgbs[-1]))
+                imageio.imwrite(filename.replace('.png', '_gt.png'), to8b(gt_imgs[i])) # save gt images
+                if len(errors):
+                    imageio.imwrite(filename.replace('.png', '_error.png'), to8b(errors[-1]))
+            
+            torch.cuda.synchronize()
+            print(f'[#{i}] frame, rendering done, time for this frame: {time.time()-t0:.4f}s')
+            print('')
     
     rgbs = torch.stack(rgbs, dim=0)
     disps = torch.stack(disps, dim=0)
