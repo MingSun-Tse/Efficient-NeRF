@@ -12,7 +12,7 @@ ours = False
 num_frames = 0
 for line in open(f):
     line = line.strip()
-    if line.startswith("rendering all images (test)"): # for DONERF code
+    if line.startswith("rendering all images (test)") and "rendering all images (test): 100%|" not in line: # for DONERF code
         start_collecting = True
         num_frames += 1
     
