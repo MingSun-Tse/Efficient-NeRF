@@ -8,20 +8,26 @@ f = sys.argv[1]
 
 total_time = []
 start_collecting = False
+done_collecting = False
 ours = False
 num_frames = 0
 for line in open(f):
     line = line.strip()
-    if line.startswith("rendering all images (test)") and "rendering all images (test): 100%|" not in line: # for DONERF code
+    if line.startswith("rendering all images (test):   0%|"): # for DONERF code
         start_collecting = True
-        num_frames += 1
-    
+
     if "Rendering video..." in line: # for our code
         start_collecting = True
         num_frames = int(line.split('n_pose: ')[1].split(")")[0])
         ours = True
 
-    if start_collecting:
+    if line.startswith("rendering all images (test): 100%|"): # for DONERF code
+        done_collecting = True
+        
+    if start_collecting and not done_collecting:
+        if line.startswith("rendering all images (test)"): # for DONERF code
+            num_frames += 1
+            
         if "[model 1] 03" in line and line.endswith("-- after inference_dict"): # for DONERF code
             t = line.split("[model 1] 03 ")[1].split(" ")[0].split('s')[0]
             total_time += [float(t)]
