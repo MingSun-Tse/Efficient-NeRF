@@ -1,8 +1,19 @@
+# ours
 CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 181 --netdepth 88 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 65 --N_iters 210000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --cache_ignore data --screen --trial.ON --trial.body_arch resmlp --num_worker 8 --warmup_lr 0.0001,200 --render_only --pretrained_ckpt Experiments/*-094904/weights/ckpt.tar --project SpeedBenchmark_nerfv3.2_W181D88
 
+CUDA_VISIBLE_DEVICES="" python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 181 --netdepth 88 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 65 --N_iters 210000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --cache_ignore data --screen --trial.ON --trial.body_arch resmlp --num_worker 8 --warmup_lr 0.0001,200 --render_only --pretrained_ckpt Experiments/*-094904/weights/ckpt.tar --project SpeedBenchmark_nerfv3.2_W181D88_CPU_SERVER005
+
+
+# donerf
 CUDA_VISIBLE_DEVICES=1 python test.py -c ../configs/DONeRF_16_samples.ini --data data/bulldozer --logDir PlaceHolderDONERF --project SpeedBenchmark_DONERF_16Samples --speed # note, change the inferenceChunckSize to 160000 in the DONeRF_16_samples.ini
 
+CUDA_VISIBLE_DEVICES="" python test.py -c ../configs/DONeRF_16_samples.ini --data data/bulldozer --logDir PlaceHolderDONERF --project SpeedBenchmark_DONERF_16Samples_CPU_SERVER005 --speed
+
+
+# nerf
 CUDA_VISIBLE_DEVICES=1 python test.py -c ../configs/NeRF_coarse_plus_fine.ini --data data/bulldozer --logDir PlaceHolder --project SpeedBenchmark_DONERF_nerf --speed # 160000 in the NeRF_coarse_plus_fine.ini is not feasible, so use the original 8000
+
+CUDA_VISIBLE_DEVICES="" python test.py -c ../configs/NeRF_coarse_plus_fine.ini --data data/bulldozer --logDir PlaceHolder --project SpeedBenchmark_DONERF_nerf_CPU_SERVER005 --speed
 
 
 
