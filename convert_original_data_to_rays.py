@@ -20,7 +20,7 @@ split_size = 4096 # manually set
 ##############################################
 
 # Set up save folders
-savedir = '%s_rays' % os.path.normpath(datadir)
+savedir = f'{os.path.normpath(datadir)}_Original_Rand_Origins_Dirs_{split_size}RaysPerNpy'
 os.makedirs(savedir, exist_ok=True)
 
 # Load all train/val images
