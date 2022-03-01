@@ -6,21 +6,22 @@ import cv2
 from run_nerf_raybased_helpers import to_tensor, to8b, to_array, get_rays
 
 r"""Usage:
-        python <this_file> <dir_path_to_original_data>
+        python <this_file> <train_val_splits> <dir_path_to_original_data>
 Example: 
-        python convert_original_data_to_rays.py data/nerf_synthetic/lego
+        python convert_original_data_to_rays.py train data/nerf_synthetic/lego
 """
 
 ############################################## Input Args
-datadir = sys.argv[1] # !! You may change this to different scenes
+splits = sys.argv[1].split(',')
+datadir = sys.argv[2] # !! You may change this to different scenes
 half_res = True # default setting, corresponding to 400x400 images in the synthetic dataset in NeRF
 white_bkgd = True # default setting for the synthetic dataset in NeRF
-splits = ['train', 'val']
 split_size = 4096 # manually set
 ##############################################
 
 # Set up save folders
-savedir = f'{os.path.normpath(datadir)}_Original_Rand_Origins_Dirs_{split_size}RaysPerNpy'
+prefix = ''.join(splits)
+savedir = f'{os.path.normpath(datadir)}_{prefix}_Rand_Origins_Dirs_{split_size}RaysPerNpy'
 os.makedirs(savedir, exist_ok=True)
 
 # Load all train/val images
@@ -82,7 +83,6 @@ all_data = to_array(all_data)
 # Save
 split = 0
 num = all_data.shape[0] // split_size * split_size
-prefix = ''.join(splits)
 for ix in range(0, num, split_size):
     split += 1
     save_path = f'{savedir}/{prefix}_{split}.npy'
