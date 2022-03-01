@@ -84,7 +84,7 @@ split = 0
 num = all_data.shape[0] // split_size * split_size
 for ix in range(0, num, split_size):
     split += 1
-    save_path = f'{savedir}/data_{split}.npy'
+    save_path = f'{savedir}/original_{split}.npy'
     d = all_data[ix: ix+split_size]
     np.save(save_path, d)
     print(f'[{split}/{num//split_size}] save_path: {save_path}')
