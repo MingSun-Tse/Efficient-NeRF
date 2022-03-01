@@ -3,7 +3,9 @@ import torch
 import imageio 
 import json
 import cv2
-from run_nerf_raybased_helpers import to_tensor, to8b, to_array, get_rays
+from run_nerf_raybased_helpers import get_rays
+to_tensor = lambda x: x.to('cpu') if isinstance(x, torch.Tensor) else torch.Tensor(x).to('cpu')
+to_array = lambda x: x if isinstance(x, np.ndarray) else x.data.cpu().numpy()
 
 r"""Usage:
         python <this_file> <train_val_splits> <dir_path_to_original_data>
