@@ -28,10 +28,21 @@ rot_theta = lambda th : torch.Tensor([
 
 def pose_spherical(theta, phi, radius):
     c2w = trans_t(radius)
-    c2w = rot_phi(phi/180.*np.pi) @ c2w
-    c2w = rot_theta(theta/180.*np.pi) @ c2w
-    c2w = torch.Tensor(np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]])) @ c2w
+    c2w = rot_phi(phi / 180. * np.pi) @ c2w
+    c2w = rot_theta(theta / 180. * np.pi) @ c2w
+    c2w = torch.Tensor([
+                [-1,0,0,0],
+                [ 0,0,1,0],
+                [ 0,1,0,0],
+                [ 0,0,0,1]]) @ c2w
     return c2w
+
+def pose_spherical_inv(c2w):
+    r"""TODO-@mst: invert c2w to theta, phi, radius
+    """
+    pass
+    assert (pose_spherical(theta, phi, radius) - c2w).abs().sum() == 0 # check
+    return theta, phi, radius
 
 
 def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=False):
