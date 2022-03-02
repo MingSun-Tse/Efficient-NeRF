@@ -40,7 +40,7 @@ args = parser.parse_args()
 
 # Hand-designed rule
 if 'ficus' in args.datadir:
-    args.ignore = '10,14,24,26,30,31,37,39,47,48,54,55,57,58,66,67,74,75,76,77,81,82,87,88,89,94,97,99'
+    args.ignore = '10,13,14,24,26,30,31,37,39,40,41,47,48,49,52,54,55,57,58,66,67,74,75,76,77,79,81,82,87,88,89,94,97,99' # images of phi >= 0
 
 # Set up save folders
 splits = args.splits.split(',')
