@@ -656,7 +656,11 @@ def create_nerf(args, near, far):
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
 
     # start iteration
-    start = 0
+    history = {
+        'start': 0,
+        'best_psnr': 0,
+        'best_psnr_step': 0
+    }
 
     # use DataParallel
     if not args.render_only: # when rendering, use just one GPU
@@ -686,7 +690,9 @@ def create_nerf(args, near, far):
         print(f'Load pretrained ckpt successfully: "{args.pretrained_ckpt}".')
         
         if args.resume:
-            start = ckpt['global_step']
+            history['start'] = ckpt['global_step']
+            history['best_psnr'] = ckpt.get('best_psnr', 0)
+            history['best_psnr_step'] = ckpt.get('best_psnr_step', 0)
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
             print('Resume optimizer successfully.')
 
@@ -784,7 +790,7 @@ def create_nerf(args, near, far):
         n_flops = get_n_flops_(model, input=dummy_rays_o, count_adds=False, rays_d=dummy_rays_d, rays_d2=dummy_rays_d)
     
     print(f'Model complexity per pixel: FLOPs {n_flops/1e6:.10f}M, Params {n_params/1e6:.10f}M')
-    return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
+    return render_kwargs_train, render_kwargs_test, history, grad_vars, optimizer
 
 
 def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False, verbose=False):
@@ -1216,15 +1222,15 @@ def train():
             file.write(open(args.config, 'r').read())
 
     # Create nerf model
-    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args, near, far)
+    render_kwargs_train, render_kwargs_test, history, grad_vars, optimizer = create_nerf(args, near, far)
     print(f'Created model {args.model_name}')
-
     bds_dict = {
         'near' : near,
         'far' : far,
     }
     render_kwargs_train.update(bds_dict)
     render_kwargs_test.update(bds_dict)
+    start, best_psnr, best_psnr_step = history['start'], history['best_psnr'], history['best_psnr_step']
 
     # Cast intrinsics to right types
     H, W, focal = hwf
@@ -1770,7 +1776,18 @@ def train():
                 *_, misc = render_path(test_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=test_images, 
                     savedir=testsavedir, render_factor=args.render_factor)
                 t_test = time.time() - t_
-            accprint(f"[TEST] Iter {i} TestPSNR {misc['test_psnr'].item():.4f} TestPSNRv2 {misc['test_psnr_v2'].item():.4f} TestSSIM {misc['test_ssim'].item():.4f} TestLPIPS {misc['test_lpips'].item():.4f} TestFLIP {misc['test_flip'].item():.4f} TrainHistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s")
+            
+            # save the best model
+            if misc['test_psnr_v2'] > best_psnr:
+                best_psnr = misc['test_psnr_v2'].item()
+                best_psnr_step = i
+                path = save_ckpt(f'ckpt_best.tar', render_kwargs_train, optimizer, best_psnr, best_psnr_step)
+                print(f'Iter {i} Save the best checkpoint: "{path}".')
+            
+            accprint(f"[TEST] Iter {i} TestPSNR {misc['test_psnr'].item():.4f} TestPSNRv2 {misc['test_psnr_v2'].item():.4f} \
+BestPSNRv2 {best_psnr:.4f} (Iter {best_psnr_step}) \
+TestSSIM {misc['test_ssim'].item():.4f} TestLPIPS {misc['test_lpips'].item():.4f} TestFLIP {misc['test_flip'].item():.4f} \
+TrainHistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s")
             print(f'Saved rendered test images: "{testsavedir}"')
             print(f'Predicted finish time: {timer()}')
 
@@ -1794,30 +1811,35 @@ def train():
 
         # save checkpoint
         if i % args.i_weights == 0:
-            path = os.path.join(logger.weights_path, 'ckpt.tar'.format(i))
-            to_save = {
-                'global_step': global_step,
-                'network_fn_state_dict': undataparallel(render_kwargs_train['network_fn'].state_dict()),
-                'optimizer_state_dict': optimizer.state_dict(),
-            }
-            if args.model_name in ['nerf'] and args.N_importance > 0:
-                to_save['network_fine_state_dict'] = undataparallel(render_kwargs_train['network_fine'].state_dict())
-            if args.model_name in ['nerf_v3.2']:
-                to_save['network_fn'] = undataparallel(render_kwargs_train['network_fn'])
-            if args.enhance_cnn:
-                to_save['network_enhance'] = undataparallel(render_kwargs_train['network_enhance']),
-                to_save['network_enhance_state_dict'] = undataparallel(render_kwargs_train['network_enhance'].state_dict())
-            torch.save(to_save, path)
-            save_log = f'Iter {i} Save checkpoint: "{path}".'
-            # # convert to onnx
-            # onnx_path = path.replace('.tar', '.onnx')
-            # save_onnx(model, onnx_path)
-            # save_log += f', onnx saved at "{onnx_path}"'
-
+            path = save_ckpt(f'ckpt_best.tar', render_kwargs_train, optimizer, best_psnr, best_psnr_step)
+            print(f'Iter {i} Save checkpoint: "{path}".')
             # send results
             if hasattr(args, 'trial') and args.trial.send_results:
                 send_results(ExpID)
-                save_log += ' Results sent!'
+                print(f'Results sent!')
+
+def save_ckpt(file_name, render_kwargs_train, optimizer, best_psnr, best_psnr_step):
+    path = os.path.join(logger.weights_path, file_name)
+    to_save = {
+        'global_step': global_step,
+        'best_psnr': best_psnr,
+        'best_psnr_step': best_psnr_step,
+        'network_fn_state_dict': undataparallel(render_kwargs_train['network_fn'].state_dict()),
+        'optimizer_state_dict': optimizer.state_dict(),
+    }
+    if args.model_name in ['nerf'] and args.N_importance > 0:
+        to_save['network_fine_state_dict'] = undataparallel(render_kwargs_train['network_fine'].state_dict())
+    if args.model_name in ['nerf_v3.2']:
+        to_save['network_fn'] = undataparallel(render_kwargs_train['network_fn'])
+    if args.enhance_cnn:
+        to_save['network_enhance'] = undataparallel(render_kwargs_train['network_enhance']),
+        to_save['network_enhance_state_dict'] = undataparallel(render_kwargs_train['network_enhance'].state_dict())
+    torch.save(to_save, path)
+    # # convert to onnx
+    # onnx_path = path.replace('.tar', '.onnx')
+    # save_onnx(model, onnx_path)
+    # save_log += f', onnx saved at "{onnx_path}"'
+    return path
 
 if __name__=='__main__':
     # torch.set_default_tensor_type('torch.cuda.FloatTensor')
