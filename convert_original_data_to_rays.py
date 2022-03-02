@@ -1,4 +1,4 @@
-import os, time, numpy as np, sys
+import os, time, numpy as np, sys, configargparse
 import torch
 import imageio 
 import json
@@ -20,27 +20,39 @@ def get_rays(H, W, focal, c2w, trans_origin='', focal_scale=1):
     return rays_o, rays_d
 
 r"""Usage:
-        python <this_file> <train_val_splits> <dir_path_to_original_data>
+        python <this_file> --splits <train_val_splits> --datadir <dir_path_to_original_data>
 Example: 
-        python convert_original_data_to_rays.py train data/nerf_synthetic/lego
+        python convert_original_data_to_rays.py --splits train --datadir data/nerf_synthetic/lego
 """
 
 ############################################## Input Args
-splits = sys.argv[1].split(',')
-datadir = sys.argv[2] # !! You may change this to different scenes
 half_res = True # default setting, corresponding to 400x400 images in the synthetic dataset in NeRF
 white_bkgd = True # default setting for the synthetic dataset in NeRF
 split_size = 4096 # manually set
 ##############################################
 
+parser = configargparse.ArgumentParser()
+parser.add_argument("--splits", type=str, default='')
+parser.add_argument("--datadir", type=str, default='')
+parser.add_argument("--suffix", type=str, default='')
+parser.add_argument("--ignore", type=str, default='', help='ignore some samples')
+args = parser.parse_args()
+
+# Hand-designed rule
+if 'ficus' in args.datadir:
+    args.ignore = '10,14,24,26,30,31,37,39,47,48,54,55,57,58,66,67,74,75,76,77,81,82,87,88,89,94,97,99'
+
 # Set up save folders
+splits = args.splits.split(',')
+datadir = args.datadir
 prefix = ''.join(splits)
-savedir = f'{os.path.normpath(datadir)}_{prefix}_Rand_Origins_Dirs_{split_size}RaysPerNpy'
+suffix = sys.argv[3] if len(sys.argv) == 4 else ''
+savedir = f'{os.path.normpath(datadir)}_{prefix}_Rand_Origins_Dirs_{split_size}RaysPerNpy{args.suffix}'
 os.makedirs(savedir, exist_ok=True)
 
 # Load all train/val images
-all_imgs, all_poses = [], []
-metas = {}
+all_imgs, all_poses, metas = [], [], {}
+ignored_img_indices = args.ignore.split(',')
 for s in splits:
     with open(os.path.join(datadir, 'transforms_{}.json'.format(s)), 'r') as fp:
         metas[s] = json.load(fp)
@@ -50,8 +62,10 @@ for s in splits:
     poses = []
     for frame in meta['frames']:
         fname = os.path.join(datadir, frame['file_path'] + '.png')
-        imgs.append(imageio.imread(fname))
-        poses.append(np.array(frame['transform_matrix']))
+        img_index = frame['file_path'].split('_')[-1] # 'file_path' example: "./train/r_3"
+        if img_index not in ignored_img_indices:
+            imgs.append(imageio.imread(fname))
+            poses.append(np.array(frame['transform_matrix']))
     imgs = (np.array(imgs) / 255.).astype(np.float32) # keep all 4 channels (RGBA)
     num_channels = imgs[-1].shape[2] # @mst: for donerf data, some of them do not have A channel
     poses = np.array(poses).astype(np.float32)
