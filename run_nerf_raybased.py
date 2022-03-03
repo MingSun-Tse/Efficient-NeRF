@@ -1300,13 +1300,13 @@ def train():
         render_kwargs_['network_fine'] = render_kwargs_train['teacher_fine'] # temporarily change the network_fine
         with torch.no_grad():
             *_, misc = render_path(test_poses, hwf, 4096, render_kwargs_, gt_imgs=test_images, render_factor=args.render_factor)
-        print(f"Teacher test: TestLoss {misc['test_loss'].item():.4f} TestPSNR {misc['test_psnr'].item():.4f}")
+        print(f"Teacher test: TestLoss {misc['test_loss'].item():.4f} TestPSNR {misc['test_psnr'].item():.4f} TestPSNRv2 {misc['test_psnr_v2'].item():.4f}")
 
     if args.test_pretrained:
         print('Testing pretrained...')
         with torch.no_grad():
             *_, misc  = render_path(test_poses, hwf, 4096, render_kwargs_test, gt_imgs=test_images, render_factor=args.render_factor)
-        print(f"Pretrained test: TestLoss {misc['test_loss'].item():.4f} TestPSNR {misc['test_psnr'].item():.4f}")
+        print(f"Pretrained test: TestLoss {misc['test_loss'].item():.4f} TestPSNR {misc['test_psnr'].item():.4f} TestPSNRv2 {misc['test_psnr_v2'].item():.4f}")
 
     # @mst: use dataloader for training
     kd_poses = None
