@@ -1811,7 +1811,8 @@ TrainHistPSNR {hist_psnr:.4f} LR {new_lrate:.8f} Time {t_test:.1f}s")
 
         # save checkpoint
         if i % args.i_weights == 0:
-            path = save_ckpt(f'ckpt_best.tar', render_kwargs_train, optimizer, best_psnr, best_psnr_step)
+            ckpt_name = f'ckpt_{i}.tar' if args.save_intermediate_models else 'ckpt.tar'
+            path = save_ckpt(ckpt_name, render_kwargs_train, optimizer, best_psnr, best_psnr_step)
             print(f'Iter {i} Save checkpoint: "{path}".')
             # send results
             if hasattr(args, 'trial') and args.trial.send_results:

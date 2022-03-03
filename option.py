@@ -230,6 +230,7 @@ parser.add_argument('--pseudo_data_hold_ratio', type=float, default=0, help='hol
 parser.add_argument('--given_render_path_rays', type=str, default='')
 parser.add_argument('--learn_depth', type=str, default='', choices=['depth', 'surface'])
 parser.add_argument('--lw_depth', type=float, default=0.1)
+parser.add_argument('--save_intermediate_models', action='store_true')
 
 # unet related
 parser.add_argument('--unet.ON', action='store_true')
