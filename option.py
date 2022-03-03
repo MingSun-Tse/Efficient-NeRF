@@ -166,6 +166,7 @@ parser.add_argument('--max_save', type=int, default=40000)
 parser.add_argument('--i_update_data', type=int, default=1000000000,
         help='interval of updating training data (changing pseudo data)')
 parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0.9')
+parser.add_argument('--pseudo_ratio', type=float, default=-1.)
 parser.add_argument('--init', type=str, default='default', choices=['default', 'orth'])
 parser.add_argument('--teacher_targets_save_path', type=str, default='teacher_targets.npy')
 parser.add_argument('--trans_origin', type=str, default='')

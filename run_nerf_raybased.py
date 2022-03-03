@@ -1046,13 +1046,13 @@ def get_dataloader(dataset_type, datadir, pseudo_ratio=0.5):
                     sampler=InfiniteSamplerWrapper(len(trainset))
             )
         elif args.data_mode in ['rays', '16x16patches_v3']:
-            trainset = BlenderDataset_v2(datadir, dim_dir=DIM_DIR, dim_rgb=DIM_RGB, hold_ratio=args.pseudo_data_hold_ratio)
+            trainset = BlenderDataset_v2(datadir, dim_dir=DIM_DIR, dim_rgb=DIM_RGB, hold_ratio=args.pseudo_data_hold_ratio, pseudo_ratio=args.pseudo_ratio)
             trainloader = torch.utils.data.DataLoader(dataset=trainset, 
                     batch_size=args.N_rand,
                     num_workers=args.num_workers,
                     pin_memory=True,
                     sampler=InfiniteSamplerWrapper(len(trainset))
-            )
+            )        
         elif args.data_mode in ['images_new']:
             trainset = BlenderDataset_v2(datadir, rand_crop_size=args.rand_crop_size, img_H=IMG_H, img_W=IMG_W)
             trainloader = torch.utils.data.DataLoader(dataset=trainset, 

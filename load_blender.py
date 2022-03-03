@@ -253,11 +253,24 @@ class BlenderDataset(Dataset):
         return len(self.frames)
 
 class BlenderDataset_v2(Dataset):
-    '''Load data of ray origins and directions. This is the most straight way.
-    '''
-    def __init__(self, datadir, dim_dir=3, dim_rgb=3, rand_crop_size=-1, img_H=0, img_W=0, hold_ratio=0):
+    r"""Load data of ray origins and directions. This is the most straightforward way.
+    """
+    def __init__(self, datadir, dim_dir=3, dim_rgb=3, rand_crop_size=-1, img_H=0, img_W=0, hold_ratio=0, pseudo_ratio=1.):
         self.datadir = datadir
-        all_splits = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('.npy')]
+        pseudo = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('.npy') and not x.startswith('train_')]
+        original = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('.npy') and x.startswith('train_')]
+        
+        # Pick a subset of pseudo data, merge it with original data
+        assert 0 <= pseudo_ratio <= 1 or pseudo_ratio == -1
+        if pseudo_ratio == -1: # use all the data
+            all_splits = pseudo + original
+        else:
+            original_ratio = 1. - pseudo_ratio
+            num_pseudo = int(len(original) / original_ratio) - len(original)
+            pseudo = np.random.choice(pseudo, num_pseudo).tolist()
+            all_splits = pseudo + original
+        
+        # Hold some data, not used for training (for ablation study)
         assert 0 <= hold_ratio < 1
         if hold_ratio > 0:
             left = int(len(all_splits) * (1 - hold_ratio))
@@ -269,7 +282,7 @@ class BlenderDataset_v2(Dataset):
         self.rand_crop_size = rand_crop_size
         self.img_H = img_H
         self.img_W = img_W
-        print(f'Load data done. #All files: {len(self.all_splits)}')
+        print(f'Load data done. #All files: {len(self.all_splits)} #Original: {len(original)} #Pseudo: {len(pseudo)}')
 
     def _square_rand_bbox(self):
         bbx1 = np.random.randint(0, self.img_W - self.rand_crop_size + 1)
