@@ -6,6 +6,46 @@ import cv2
 to_tensor = lambda x: x.to('cpu') if isinstance(x, torch.Tensor) else torch.Tensor(x).to('cpu')
 to_array = lambda x: x if isinstance(x, np.ndarray) else x.data.cpu().numpy()
 
+def tile(a, dim, n_tile):
+    r"""Copied from DONERF code 'util/helper.py'.
+    """
+    init_dim = a.size(dim)
+    repeat_idx = [1] * a.dim()
+    repeat_idx[dim] = n_tile
+    a = a.repeat(*repeat_idx)
+    order_index = torch.LongTensor(np.concatenate([init_dim * np.arange(n_tile) + i for i in range(init_dim)])).to(
+        a.device)
+    return torch.index_select(a, dim, order_index)
+
+def generate_ray_directions(w, h, fov, focal):
+    r"""Copied from DONERF code 'util/raygeneration.py'.
+    """
+    x_dist = np.tan(fov / 2) * focal
+    y_dist = x_dist * (h / w)
+    x_dist_pp = x_dist / (w / 2)
+    y_dist_pp = y_dist / (h / 2)
+
+    start = np.array([-(x_dist - x_dist_pp/2), -(y_dist - y_dist_pp/2), focal])
+    ray_d = np.repeat(start[None], repeats=w * h, axis=0).reshape((h, w, -1))
+    w_range = np.repeat(np.arange(0, w)[None], repeats=h, axis=0)
+    h_range = np.repeat(np.arange(0, h)[None], repeats=w, axis=0).T
+    ray_d[:, :, 0] += x_dist_pp * w_range
+    ray_d[:, :, 1] += y_dist_pp * h_range
+
+    dirs = ray_d / np.tile(np.linalg.norm(ray_d, axis=2)[:, :, None], (1, 1, 3))
+    dirs[:, :, 1] *= -1.
+    dirs[:, :, 2] *= -1.
+    return dirs
+
+def nerf_get_ray_dirs(rotations, directions) -> torch.tensor:
+    r"""Copied from DONERF code 'nerf_raymarch_common.py'.
+    """
+    # multiply them with the camera transformation matrix
+    ray_directions = torch.bmm(rotations, torch.transpose(directions, 1, 2))
+    ray_directions = torch.transpose(ray_directions, 1, 2).reshape(directions.shape[0] * directions.shape[1], -1)
+
+    return ray_directions
+
 def get_rays(H, W, focal, c2w, trans_origin='', focal_scale=1):
     focal *= focal_scale
     i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H)) # pytorch's meshgrid has indexing='ij'
@@ -37,6 +77,7 @@ parser.add_argument("--splits", type=str, default='')
 parser.add_argument("--datadir", type=str, default='')
 parser.add_argument("--suffix", type=str, default='')
 parser.add_argument("--ignore", type=str, default='', help='ignore some samples')
+parser.add_argument("--donerf", action='store_true')
 args = parser.parse_args()
 
 # Set up save folders
@@ -100,7 +141,28 @@ print(f'Resize, done. all_imgs shape {all_imgs.shape}, all_poses shape {all_pose
 # Get rays together
 all_data = [] # All rays_o, rays_d, rgb will be saved here
 for im, po in zip(all_imgs, all_poses):
-    rays_o, rays_d = get_rays(H, W, focal, po[:3, :4]) # [H, W, 3]
+    if args.donerf:
+        # -- Refers to DONERF code:
+        # https://github.com/MingSun-Tse/DONERF/blob/1986abe52e1fe26d8192d53452c54ff54a463761/src/datasets.py#L258
+        # https://github.com/MingSun-Tse/DONERF/blob/1986abe52e1fe26d8192d53452c54ff54a463761/src/features.py#L377
+        po = po.unsqueeze(dim = 0) # 'nerf_get_ray_dirs' later needs a batch dim
+        rotations = po[:, :3, :3] 
+        npdirs = generate_ray_directions(W, H, camera_angle_x, focal)
+        directions = torch.from_numpy(npdirs.flatten().reshape(-1, 3)).unsqueeze(dim=0).float() # 'nerf_get_ray_dirs' later needs a batch dim
+        rays_d = nerf_get_ray_dirs(rotations, directions).view(H, W, 3) # [H, W, 3]
+        
+        # n_images, n_samples = 1, H * W
+        # rays_o1 = tile(po, dim=0, n_tile=n_samples).view(H, W, 3)
+        rays_o = po[0, :3, -1].expand(rays_d.shape) # [H, W, 3]
+        # --
+
+        # -- For debug, use NeRF's ray generating code, which is different from DONERF's: (rays_d2 - rays_d) is not zero
+        # rays_o2, rays_d2 = get_rays(H, W, focal, po[0, :3, :4]) # [H, W, 3]
+        # import pdb; pdb.set_trace()
+        # --
+    else:
+        rays_o, rays_d = get_rays(H, W, focal, po[0, :3, :4]) # [H, W, 3]
+
     data = torch.cat([rays_o, rays_d, im], dim=-1) # [H, W, 9]
     all_data += [data.view(H*W, 9)] # [H*W, 9]
 all_data = torch.cat(all_data, dim=0)
