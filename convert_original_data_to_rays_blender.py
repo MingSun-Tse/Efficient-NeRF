@@ -22,7 +22,8 @@ def get_rays(H, W, focal, c2w, trans_origin='', focal_scale=1):
 r"""Usage:
         python <this_file> --splits <train_val_splits> --datadir <dir_path_to_original_data>
 Example: 
-        python convert_original_data_to_rays.py --splits train --datadir data/nerf_synthetic/lego
+        python convert_original_data_to_rays_blender.py --splits train --datadir data/bulldozer
+        python convert_original_data_to_rays_blender.py --splits train --datadir data/nerf_synthetic/lego
 """
 
 ############################################## Input Args
@@ -37,10 +38,6 @@ parser.add_argument("--datadir", type=str, default='')
 parser.add_argument("--suffix", type=str, default='')
 parser.add_argument("--ignore", type=str, default='', help='ignore some samples')
 args = parser.parse_args()
-
-# Hand-designed rule
-if 'ficus' in args.datadir:
-    args.ignore = '10,13,14,24,26,30,31,37,39,40,41,47,48,49,52,54,55,57,58,66,67,74,75,76,77,79,81,82,87,88,89,94,97,99' # images of phi >= 0
 
 # Set up save folders
 splits = args.splits.split(',')
@@ -77,7 +74,14 @@ print(f'Read all images and poses, done. all_imgs shape {all_imgs.shape}, all_po
 
 # Resize if necessary
 H, W = all_imgs[0].shape[:2]
-camera_angle_x = float(meta['camera_angle_x'])
+# -- @mst: DONERF data includes 'camera_angle_x' in 'dataset_info.json'. Here expand to its case.
+if 'camera_angle_x' in meta: 
+    camera_angle_x = float(meta['camera_angle_x'])
+else: # to train with DONERF data
+    with open(os.path.join(datadir, 'dataset_info.json'), 'r') as fp: 
+        camera_angle_x = float(json.load(fp)['camera_angle_x'])
+# --
+
 focal = .5 * W / np.tan(.5 * camera_angle_x)
 if half_res:
     H = H // 2
