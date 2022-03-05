@@ -138,9 +138,9 @@ if half_res:
     all_imgs = imgs_half_res
 all_imgs = to_tensor(all_imgs)
 all_poses = to_tensor(all_poses)
-if white_bkgd:
+if (num_channels == 4) and white_bkgd: # on DONERF dataset, classroom, forest, pavillon, they do not have alpha channel
     all_imgs = all_imgs[..., :3] * all_imgs[..., -1:] + (1. - all_imgs[..., -1:])
-print(f'Resize, done. all_imgs shape {all_imgs.shape}, all_poses shape {all_poses.shape}')
+print(f'Resize, done. all_imgs shape {all_imgs.shape}, all_poses shape {all_poses.shape}, num_channels of the images {num_channels}')
 
 # Get rays together
 all_data = [] # All rays_o, rays_d, rgb will be saved here
