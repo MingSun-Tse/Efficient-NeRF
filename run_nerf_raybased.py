@@ -272,6 +272,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                         else:
                             pts = point_sampler.sample_test(c2w[:3, :4]) # [H*W, n_sample*3]
                         model_input = positional_embedder(pts)
+                        model_input = model_input[:16384]
                         torch.cuda.synchronize(); t_input = time.time()
                         if args.learn_depth:
                             rgbd = model(model_input)
@@ -1097,16 +1098,10 @@ def get_pseudo_ratio(schedule, current_step):
         pr = (prs[1] - prs[0]) / (steps[1] - steps[0]) * (current_step - steps[0]) + prs[0]
     return pr
 
-def save_onnx(model, onnx_path):
+def save_onnx(model, onnx_path, dummy_input):
     model = copy.deepcopy(model)
-    mobile_H = mobile_W = 256
-    if hasattr(model, 'module'): model = model.module
-    if args.model_name in ['nerf_v3.2']:
-        dummy_input = torch.randn(mobile_H * mobile_W, model.input_dim).to(device)
-    elif args.model_name in ['nerf_v3.3', 'nerf_v6']:
-        dummy_input = torch.randn(1, model.input_dim, mobile_H, mobile_W).to(device)
-    else:
-        raise NotImplementedError
+    if hasattr(model, 'module'): 
+        model = model.module
     torch.onnx.export(model.cpu(),
                     dummy_input.cpu(),
                     onnx_path,
@@ -1122,16 +1117,15 @@ def save_onnx(model, onnx_path):
     del model
 
 #TODO-@mst: move these utility functions to a better place
-def check_onnx(model, onnx_path):
-    ''' refer to https://pytorch.org/tutorials/advanced/super_resolution_with_onnxruntime.html '''
+def check_onnx(model, onnx_path, dummy_input):
+    r"""Refer to https://pytorch.org/tutorials/advanced/super_resolution_with_onnxruntime.html
+    """
     import onnx, onnxruntime
     model = copy.deepcopy(model)
-    if hasattr(model, 'module'): model = model.module
-    model = model.cpu()
-    # get torch output as ground truth
-    batch_size = 64
-    x = torch.randn(batch_size, model.input_dim, requires_grad=True)
-    torch_out = model(x)
+    if hasattr(model, 'module'): 
+        model = model.module
+    model, dummy_input = model.cpu(), dummy_input.cpu()
+    torch_out = model(dummy_input)
     
     onnx_model = onnx.load(onnx_path)
     onnx.checker.check_model(onnx_model)
@@ -1139,7 +1133,7 @@ def check_onnx(model, onnx_path):
     def to_numpy(tensor):
         return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
     # compute ONNX Runtime output prediction
-    ort_inputs = {ort_session.get_inputs()[0].name: to_numpy(x)}
+    ort_inputs = {ort_session.get_inputs()[0].name: to_numpy(dummy_input)}
     ort_outs = ort_session.run(None, ort_inputs)
     # compare ONNX Runtime and PyTorch results
     np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-05)
@@ -1357,9 +1351,18 @@ def train():
         exit(0)
     
     if args.convert_to_onnx:
-        onnx_path = args.pretrained_ckpt.replace('.tar', '.onnx')
-        save_onnx(render_kwargs_test['network_fn'], onnx_path)
-        check_onnx(render_kwargs_test['network_fn'], onnx_path)
+        if args.pretrained_ckpt:
+            onnx_path = args.pretrained_ckpt.replace('.tar', '.onnx')
+        else:
+            onnx_path = f'{logger.weights_path}/ckpt.onnx'
+        mobile_H, mobile_W = 256, 256
+        if args.model_name in ['nerf_v3.2']:
+            dummy_input = torch.randn(1, mobile_H, mobile_W, render_kwargs_test['network_fn'].input_dim).to(device)
+        else:
+            raise NotImplementedError
+
+        save_onnx(render_kwargs_test['network_fn'], onnx_path, dummy_input)
+        check_onnx(render_kwargs_test['network_fn'], onnx_path, dummy_input)
         print(f'Convert to onnx done. Saved at "{onnx_path}"') 
         exit(0)
 
