@@ -1108,6 +1108,7 @@ def save_onnx(model, onnx_path, dummy_input):
                     export_params=True,
                     opset_version=11,
                     do_constant_folding=True,
+                    keep_initializers_as_inputs=False,
                     input_names=['input'],
                     output_names=['output'],
                     dynamic_axes={
