@@ -1140,6 +1140,10 @@ def check_onnx(model, onnx_path, dummy_input):
     np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-05)
     print("Exported model has been tested with ONNXRuntime, and the result looks good!")
 
+    # Try to fix bias 'kind:Initializer' bug
+    # onnx_model.graph.ClearField('initializer')
+    # onnx.save_model(onnx_model, onnx_path)
+
 def train():
     # Load data
     if args.dataset_type == 'llff':
