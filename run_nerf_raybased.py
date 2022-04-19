@@ -1362,7 +1362,7 @@ def train():
             onnx_path = f'{logger.weights_path}/ckpt.onnx'
         mobile_H, mobile_W = 256, 256
         if args.model_name in ['nerf_v3.2']:
-            dummy_input = torch.randn(1, render_kwargs_test['network_fn'].input_dim, mobile_H, mobile_W).to(device)
+            dummy_input = torch.randn(mobile_H*mobile_W, render_kwargs_test['network_fn'].input_dim).to(device)
             # default shape of ONNX: [N, C, H, W]
         else:
             raise NotImplementedError
