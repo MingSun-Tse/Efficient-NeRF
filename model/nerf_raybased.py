@@ -625,6 +625,8 @@ class NeRF_v3_2(nn.Module):
         self.tail = nn.Linear(input_dim, output_dim) if args.linear_tail else nn.Sequential(*[nn.Linear(Ws[D-2], output_dim), nn.Sigmoid()])
     
     def forward(self, x): # x: embedded position coordinates
+        if x.shape[-1] != self.input_dim: # [N, C, H, W]
+            x = x.permute(0, 2, 3, 1)
         x = self.head(x)
         x = self.body(x) + x if self.args.use_residual else self.body(x)
         return self.tail(x)
