@@ -1105,6 +1105,7 @@ def save_onnx(model, onnx_path, dummy_input):
     torch.onnx.export(model.cpu(),
                     dummy_input.cpu(),
                     onnx_path,
+                    verbose=True,
                     export_params=True,
                     opset_version=11,
                     do_constant_folding=True,
@@ -1362,8 +1363,7 @@ def train():
             onnx_path = f'{logger.weights_path}/ckpt.onnx'
         mobile_H, mobile_W = 256, 256
         if args.model_name in ['nerf_v3.2']:
-            dummy_input = torch.randn(mobile_H*mobile_W, render_kwargs_test['network_fn'].input_dim).to(device)
-            # default shape of ONNX: [N, C, H, W]
+            dummy_input = torch.randn(1, mobile_H, mobile_W, render_kwargs_test['network_fn'].input_dim).to(device)
         else:
             raise NotImplementedError
 
