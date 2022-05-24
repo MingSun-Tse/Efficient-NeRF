@@ -489,6 +489,7 @@ def config_parser():
                         help='input data directory')
 
     # training options
+    parser.add_argument('--N_iters', type=int, default=200000)
     parser.add_argument("--netdepth", type=int, default=8, 
                         help='layers in network')
     parser.add_argument("--netwidth", type=int, default=256, 
@@ -595,9 +596,11 @@ def config_parser():
     parser.add_argument('--plot_interval', type=int, default=100000000)
     parser.add_argument('--save_interval', type=int, default=2000, help="the interval to save model")
     parser.add_argument('--video_tag', type=str, default='')
+    parser.add_argument('--cache_ignore', type=str, default='')
 
     # added arguments (do not add new functionalities, just to make the hyper-param tuning more flexible)
     parser.add_argument('--skips', type=str, default='4')
+
 
     return parser
 
@@ -756,7 +759,7 @@ def train():
     if use_batching:
         rays_rgb = torch.Tensor(rays_rgb).to(device)
 
-    N_iters = 200000 + 1
+    N_iters = args.N_iters + 1 # 200000
     print('Begin')
     print('%d TRAIN views are' % len(i_train), i_train) # @mst: image index list
     print('%d TEST views are' % len(i_test), i_test)
