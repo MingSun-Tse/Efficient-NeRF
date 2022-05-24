@@ -1,3 +1,5 @@
+logs
+nerfv3.2_donerf_data_test_results
 run_nerf_v2.py
 *.pyc
 .script_history
