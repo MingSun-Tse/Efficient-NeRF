@@ -267,10 +267,13 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
                 
                 elif args.model_name in ['nerf_v3.2']:
                     with torch.no_grad():
-                        if args.given_render_path_rays:
+                        if args.given_render_path_rays: # To test DONERF data using our model
                             pts = point_sampler.sample_train(all_rays_o[i], all_rays_d[i], perturb=0) # [H*W, n_sample*3]
                         else:
-                            pts = point_sampler.sample_test(c2w[:3, :4]) # [H*W, n_sample*3]
+                            if args.plucker:
+                                pts = point_sampler.sample_test_plucker(c2w[:3, :4])
+                            else:
+                                pts = point_sampler.sample_test(c2w[:3, :4]) # [H*W, n_sample*3]
                         model_input = positional_embedder(pts)
                         torch.cuda.synchronize(); t_input = time.time()
                         if args.learn_depth:
@@ -546,7 +549,10 @@ def create_nerf(args, near, far):
             grad_vars += list(model.parameters())
     
     elif args.model_name in ['nerf_v3.2']:
-        input_dim = 6 * positional_embedder.embed_dim if args.plucker else args.n_sample_per_ray * 3 * positional_embedder.embed_dim
+        if args.plucker:
+            input_dim = 6 * positional_embedder.embed_dim
+        else:
+            input_dim = args.n_sample_per_ray * 3 * positional_embedder.embed_dim
         model = NeRF_v3_2(args, input_dim, args.dim_rgb).to(device)
         if not args.freeze_pretrained:
             grad_vars += list(model.parameters())
@@ -1614,8 +1620,10 @@ def train():
             elif args.model_name in ['nerf_v3.2']:
                 model = render_kwargs_train['network_fn']
                 perturb = render_kwargs_train['perturb']
-                pts = point_sampler.sample_train_plucker(rays_o, rays_d) if args.plucker else \
-                        point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
+                if args.plucker:
+                    pts = point_sampler.sample_train_plucker(rays_o, rays_d)
+                else:
+                    pts = point_sampler.sample_train(rays_o, rays_d, perturb=perturb)
                 rgb = model(positional_embedder(pts))
 
             elif args.model_name in ['nerf_v3.3']:

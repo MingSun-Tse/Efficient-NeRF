@@ -138,8 +138,17 @@ class PointSampler():
         r"""Use Plucker coordinates as ray representation.
         Refer to: https://faculty.sites.iastate.edu/jia/files/inline-files/plucker-coordinates.pdf
         """
-        m = torch.cross(rays_o, rays_d) # [n_ray, 3]
+        m = torch.cross(rays_o, rays_d, dim=-1) # [n_ray, 3]
         pts = torch.cat([rays_d, m], dim=-1) # [n_ray, 6]
+        return pts
+
+    def sample_test_plucker(self, c2w): # c2w: [3, 4]
+        r"""Use Plucker coordinates as ray representation.
+        """
+        rays_d = torch.sum(self.dirs.unsqueeze(dim=-2) * c2w[:3,:3], dim=-1).view(-1, 3) # [H*W, 3] # TODO-@mst: improve this non-intuitive impl.
+        rays_o = c2w[:3, -1].expand(rays_d.shape) # [H*W, 3]
+        m = torch.cross(rays_o, rays_d, dim=-1) # [H*W, 3]
+        pts = torch.cat([rays_d, m], dim=-1) # [H*W, 6]
         return pts
 
 class PositionalEmbedder():
