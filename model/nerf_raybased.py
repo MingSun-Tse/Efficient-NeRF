@@ -133,6 +133,14 @@ class PointSampler():
             z_vals = lower + (upper - lower) * t_rand  # [n_img, patch_h, patch_w, n_sample]
         pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None] # [n_img, patch_h, patch_w, n_sample, 3]
         return pts
+    
+    def sample_train_plucker(self, rays_o, rays_d):
+        r"""Use Plucker coordinates as ray representation.
+        Refer to: https://faculty.sites.iastate.edu/jia/files/inline-files/plucker-coordinates.pdf
+        """
+        m = torch.cross(rays_o, rays_d) # [n_ray, 3]
+        pts = torch.cat([rays_d, m], dim=-1) # [n_ray, 6]
+        return pts
 
 class PositionalEmbedder():
     def __init__(self, L, include_input=True):
