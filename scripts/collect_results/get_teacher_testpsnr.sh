@@ -14,3 +14,12 @@ echo lego & tail -n $1 Experiments/nerf__lego_SERVER*2021*/log/log.txt | grep "\
 echo materials & tail -n $1 Experiments/nerf__materials_SERVER*2021*/log/log.txt | grep "\[TEST\] Iter $2"
 echo mic & tail -n $1 Experiments/nerf__mic_SERVER*2021*/log/log.txt | grep "\[TEST\] Iter $2"
 echo ship & tail -n $1 Experiments/nerf__ship_SERVER*2021*/log/log.txt | grep "\[TEST\] Iter $2"
+
+echo chair: & tail -n $1 Experiments/nerf__chair_SERVER-*202205*800x800*/log/log.txt | grep "\[TEST\] Iter $2"
+echo drums: & tail -n $1 Experiments/nerf__drums_SERVER-*202205*800x800*/log/log.txt | grep "\[TEST\] Iter $2"
+echo ficus: & tail -n $1 Experiments/nerf__ficus_SERVER-*202205*800x800*/log/log.txt | grep "\[TEST\] Iter $2"
+echo hotdog: & tail -n $1 Experiments/nerf__hotdog_SERVER-*202205*800x800*/log/log.txt | grep "\[TEST\] Iter $2"
+echo lego: & tail -n $1 Experiments/nerf__lego_SERVER-*202205*800x800*/log/log.txt | grep "\[TEST\] Iter $2"
+echo materials: & tail -n $1 Experiments/nerf__materials_SERVER-*202205*800x800*/log/log.txt | grep "\[TEST\] Iter $2"
+echo mic: & tail -n $1 Experiments/nerf__mic_SERVER-*202205*800x800*/log/log.txt | grep "\[TEST\] Iter $2"
+echo ship: & tail -n $1 Experiments/nerf__ship_SERVER-*202205*800x800*/log/log.txt | grep "\[TEST\] Iter $2"
