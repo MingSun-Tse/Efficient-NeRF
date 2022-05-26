@@ -465,7 +465,13 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         rec = rgbs.permute(0, 3, 1, 2) # [N, 3, H, W]
         ref = gt_imgs.permute(0, 3, 1, 2) # [N, 3, H, W]
         rescale = lambda x, ymin, ymax: (ymax - ymin) / (x.max() - x.min()) * (x - x.min()) + ymin
-        lpipses = lpips(rescale(rec, -1, 1), rescale(ref, -1, 1)) 
+        rec, ref = rescale(rec, -1, 1), rescale(ref, -1, 1)
+        lpipses = []
+        mini_batch_size = 8
+        for i in np.arange(0, len(gt_imgs), mini_batch_size):
+            end = min(i + mini_batch_size, len(gt_imgs)) 
+            lpipses += [lpips(rec[i: end], ref[i: end])]
+        lpipses = torch.cat(lpipses, dim=0)
 
         # -- get FLIP loss
         # flip standard values
