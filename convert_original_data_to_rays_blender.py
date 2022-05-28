@@ -67,7 +67,6 @@ Example:
 """
 
 ############################################## Input Args
-half_res = True # default setting, corresponding to 400x400 images in the synthetic dataset in NeRF
 white_bkgd = True # default setting for the synthetic dataset in NeRF
 split_size = 4096 # manually set
 ##############################################
@@ -78,6 +77,7 @@ parser.add_argument("--datadir", type=str, default='')
 parser.add_argument("--suffix", type=str, default='')
 parser.add_argument("--ignore", type=str, default='', help='ignore some samples')
 parser.add_argument("--donerf", action='store_true')
+parser.add_argument("--full_res", action='store_true')
 args = parser.parse_args()
 
 # Hand-designed rule
@@ -88,7 +88,6 @@ if 'ficus' in args.datadir:
 splits = args.splits.split(',')
 datadir = args.datadir
 prefix = ''.join(splits)
-suffix = sys.argv[3] if len(sys.argv) == 4 else ''
 savedir = f'{os.path.normpath(datadir)}_{prefix}_Rand_Origins_Dirs_{split_size}RaysPerNpy{args.suffix}'
 os.makedirs(savedir, exist_ok=True)
 
@@ -128,6 +127,7 @@ else: # to train with DONERF data
 # --
 
 focal = .5 * W / np.tan(.5 * camera_angle_x)
+half_res = not args.full_res
 if half_res:
     H = H // 2
     W = W // 2
@@ -165,7 +165,7 @@ for im, po in zip(all_imgs, all_poses):
         # import pdb; pdb.set_trace()
         # --
     else:
-        rays_o, rays_d = get_rays(H, W, focal, po[0, :3, :4]) # [H, W, 3]
+        rays_o, rays_d = get_rays(H, W, focal, po[:3, :4]) # [H, W, 3]
 
     data = torch.cat([rays_o, rays_d, im], dim=-1) # [H, W, 9]
     all_data += [data.view(H*W, 9)] # [H*W, 9]
