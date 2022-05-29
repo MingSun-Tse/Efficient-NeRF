@@ -1247,7 +1247,7 @@ def train():
     # Cast intrinsics to right types
     H, W, focal = hwf
     H, W, focal = int(H), int(W), float(focal)
-    if args.focal_scale > 1:
+    if args.focal_scale > 0:
         focal *= args.focal_scale
         print(f'!! Focal changed to {focal} (scaled by {args.focal_scale})')
     hwf = [H, W, focal]
