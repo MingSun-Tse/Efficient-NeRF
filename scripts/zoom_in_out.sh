@@ -1,0 +1,21 @@
+# nerf, lego
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf --config configs/lego.txt --pretrained_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --cache_ignore data,__pycache__,torchsearchsorted --render_only --render_test --testskip 20 --focal_scale 4 --project Test__nerf__lego__Focalx4
+
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf --config configs/lego.txt --pretrained_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --cache_ignore data,__pycache__,torchsearchsorted --render_only --render_test --testskip 20 --focal_scale 2 --project Test__nerf__lego__Focalx2
+
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf --config configs/lego.txt --pretrained_ckpt Experiments/nerf__lego_SERVER-20210613-195444/blender_paper_lego/200000.tar --cache_ignore data,__pycache__,torchsearchsorted --render_only --render_test --testskip 20 --focal_scale 0.5 --project Test__nerf__lego__Focalx0.5
+
+# nerfv3.2. lego
+CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --project Test__nerfv3.2_W256D88__lego__AfterFT__Focalx4 --cache_ignore data --screen --trial.ON --trial.body_arch resmlp --num_worker 8 --pretrained_ckpt Experiments/nerfv3.2__lego__S16W256D88*SERVER-2022030[1-4]*-220912/weights/ckpt.tar --render_only --render_test --testskip 20 --focal_scale 4
+
+CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --project Test__nerfv3.2_W256D88__lego__AfterFT__Focalx2 --cache_ignore data --screen --trial.ON --trial.body_arch resmlp --num_worker 8 --pretrained_ckpt Experiments/nerfv3.2__lego__S16W256D88*SERVER-2022030[1-4]*-220912/weights/ckpt.tar --render_only --render_test --testskip 20 --focal_scale 2
+
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --project Test__nerfv3.2_W256D88__lego__AfterFT__Focalx0.1 --cache_ignore data --screen --trial.ON --trial.body_arch resmlp --num_worker 8 --pretrained_ckpt Experiments/nerfv3.2__lego__S16W256D88*SERVER-2022030[1-4]*-220912/weights/ckpt.tar --render_only --render_test --testskip 1 --focal_scale 0.1
+
+
+########################################
+# nerf, leaves
+CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --model_name nerf --config configs/leaves.txt --pretrained_ckpt Experiments/nerf__leaves_SERVER144-20211101-125237/weights/ckpt.tar --cache_ignore data --render_only --render_test --screen --focal_scale 2 --project Test__nerf__leaves__Focalx2
+
+# nerfv3.2. leaves
+CUDA_VISIBLE_DEVICES=1 python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/leaves_noview.txt --pretrained_ckpt Experiments/nerfv3.2__llff_leaves__S16W256D88_DPRGB_Res_NoDir_ResMLPBody__DataV8_BS98304_Hard0.2_20xBS__WarmupLR__Resume_OriginalTrain_SERVER115-20220305-001644/weights/ckpt_best.tar --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_llff_data/room_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --n_pose_video 120 --N_iters 1200000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --trial.ON --trial.body_arch resmlp --cache_ignore data --render_only --render_test --screen --focal_scale 2 --project Test__nerfv3.2__llff_leaves__AfterFT__Focalx2
