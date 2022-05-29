@@ -1246,15 +1246,16 @@ def train():
 
     # Cast intrinsics to right types
     H, W, focal = hwf
-    H, W = int(H), int(W)
+    H, W, focal = int(H), int(W), float(flocal)
+    if args.focal_scale > 1:
+        focal *= args.focal_scale
+        print(f'!! Focal changed to {focal} (scaled by {args.focal_scale})')
     hwf = [H, W, focal]
     k = math.sqrt(float(args.N_rand) / H / W)
     patch_h, patch_w = int(H * k), int(W * k)
     global IMG_H; global IMG_W
     IMG_H, IMG_W = H, W
-    if args.focal_scale > 1:
-        focal *= args.focal_scale
-        print(f'!! Focal changed to {focal} (scaled by {args.focal_scale})')
+
 
     # Set up sampler
     global point_sampler; point_sampler = PointSampler(H, W, focal, args.n_sample_per_ray, near, far)
