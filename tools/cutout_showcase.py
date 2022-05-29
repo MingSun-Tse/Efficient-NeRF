@@ -8,7 +8,10 @@ import configargparse
 
 is_img = lambda x: os.path.splitext(x)[-1].lower() in ['.jpg', '.jpeg', '.png', '.bmp']
 
-"""Usage: py tools/cutout_showcase.py --inDir picked_results_blender_llff --include hotdog --cut_hw 100,100 --upperleft 210,200  
+"""Usage: 
+py tools/cutout_showcase.py --inDir picked_results_blender_llff --include hotdog --cut_hw 100,100 --upperleft 210,200
+py tools/cutout_showcase.py --inDir picked_results_blender_800x800 --include chair --full_res --cut_hw 200,200 --upperleft 360,200 # 800x800 images
+
 """
 
 parser = configargparse.ArgumentParser()
@@ -18,6 +21,7 @@ parser.add_argument("--exclude", type=str, default='')
 parser.add_argument("--upperleft", type=str, default='')
 parser.add_argument("--cut_hw", type=str, default='')
 parser.add_argument("--plot_rect", action='store_true')
+parser.add_argument("--full_res", action='store_true')
 args = parser.parse_args()
 
 def plot_rect(img, w1, h1, h, w, color='red'):
@@ -43,10 +47,11 @@ for img_path in all_imgs:
     img = Image.open(img_path)
     
     # Resize
-    if img.size[0] == 800 and img.size[1] == 800: # blender dataset
-        # img = cv2.resize(img, (400, 400), interpolation=cv2.INTER_AREA)
-        img = img.resize((400, 400))
-        print(f'==> resize image to 400x400: "{img_path}"')
+    if not args.full_res:
+        if img.size[0] == 800 and img.size[1] == 800: # blender dataset
+            # img = cv2.resize(img, (400, 400), interpolation=cv2.INTER_AREA)
+            img = img.resize((400, 400))
+            print(f'==> resize image to 400x400: "{img_path}"')
     
     # To white bkgd
     img = np.array(img)
