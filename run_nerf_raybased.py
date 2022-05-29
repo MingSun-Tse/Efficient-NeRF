@@ -40,10 +40,11 @@ accprint = logger.log_printer.accprint
 netprint = logger.log_printer.netprint
 ExpID = logger.ExpID
 
-# redefine get_rays
-from functools import partial
-get_rays1 = get_rays
-get_rays = partial(get_rays, trans_origin=args.trans_origin, focal_scale=args.focal_scale)
+# -- Re-define get_rays
+# from functools import partial
+# get_rays1 = get_rays
+# get_rays = partial(get_rays, trans_origin=args.trans_origin, focal_scale=args.focal_scale)
+# --
 
 DIM_DIR = args.dim_dir
 DIM_RGB = args.dim_rgb
@@ -254,7 +255,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
 
                 # get rays_o and rays_d
                 if args.model_name in ['nerf_v2', 'nerf_v3', 'nerf_v4', 'nerf_v3.4.2', 'nerf_v3.6', 'nerf_v3.7', 'nerf_v3.8']:
-                    rays_o, rays_d = get_rays1(H, W, focal, c2w[:3, :4]) # [H, W, 3]
+                    rays_o, rays_d = get_rays(H, W, focal, c2w[:3, :4]) # [H, W, 3]
                     rays_o, rays_d = rays_o.view(-1, 3), rays_d.view(-1, 3) # [H*W, 3]
 
                 # network forward
@@ -1251,11 +1252,14 @@ def train():
     patch_h, patch_w = int(H * k), int(W * k)
     global IMG_H; global IMG_W
     IMG_H, IMG_W = H, W
+    if args.focal_scale > 1:
+        focal *= args.focal_scale
+        print(f'!! Focal changed to {focal} (scaled by {args.focal_scale})')
 
-    # set up sampler
+    # Set up sampler
     global point_sampler; point_sampler = PointSampler(H, W, focal, args.n_sample_per_ray, near, far)
 
-    # get train, test, video poses and images
+    # Get train, test, video poses and images
     train_images, train_poses = images[i_train], poses[i_train]
     test_poses, test_images = poses[i_test], images[i_test]
     n_original_img = len(train_images)
