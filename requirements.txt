@@ -1,5 +1,5 @@
 transforms3d
-smilelogging
+smilelogging==0.2.10
 imageio-ffmpeg
 lmdb==1.2.1
 tqdm==4.61.2
