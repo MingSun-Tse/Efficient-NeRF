@@ -1,9 +1,9 @@
 # R2L: Distilling NeRF to NeLF
 
 <div align="center">
-    <a><img src="figs/snap.png"  height="90px" ></a>
-    &nbsp &nbsp
-    <a><img src="figs/smile.png"  height="90px" ></a>
+    <a><img src="figs/snap.png"  height="120px" ></a>
+    &nbsp
+    <a><img src="figs/smile.png"  height="120px" ></a>
 </div>
 
 This repository is for the new neral light field (NeLF) method introduced in the following ECCV'22 paper:
