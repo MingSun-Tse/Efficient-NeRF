@@ -1,5 +1,11 @@
 # R2L: Distilling NeRF to NeLF
 
+<div align="center">
+    <a><img src="figs/snap.png"  height="90px" ></a>
+    &nbsp &nbsp
+    <a><img src="figs/smile.png"  height="90px" ></a>
+</div>
+
 This repository is for the new neral light field (NeLF) method introduced in the following ECCV'22 paper:
 > **R2L: Distilling Neural Radiance Field to Neural Light Field for Efficient Novel View Synthesis [[Arxiv](https://arxiv.org/abs/2203.17261)] [[Project](https://snap-research.github.io/R2L/)]** \
 > [Huan Wang](http://huanwang.tech/) [1,2], [Jian Ren](https://alanspike.github.io/) [1], [Zeng Huang](https://zeng.science/) [1], [Kyle Olszewski](https://kyleolsz.github.io/) [1], [Menglei Chai](https://mlchai.com/) [1], [Yun Fu](http://www1.ece.neu.edu/~yunfu/) [2], and [Sergey Tulyakov](http://www.stulyakov.com/) [1] \
@@ -22,7 +28,7 @@ sh scripts/download_data_v2.sh
 - `conda activate R2L`
 - `pip install -r requirements.txt` (torch==1.9.0, torchvision==0.10.0)
 
-### 3. Test our trained models
+### 3. Test our trained R2L models
 - Download our trained models here.
 - Run
 ```bash
@@ -33,7 +39,7 @@ Here we only show the example of scene chair. You may test on other scenes simpl
 
 
 ### 4. Train R2L models
-There are two major steps in R2L training. (1) Use *pretrained* NeRF model to generate synthetic data and train R2L network on the synthetic data -- this step can make our R2L model perform *comparably* to the NeRF teacher; (2) Finetune the R2L model in step (1) on the *real* data -- this step will further boost the performance and make our R2L model *outperform* the NeRF teacher.
+There are two major steps in R2L training. (1) Use *pretrained* NeRF model to generate synthetic data and train R2L network on the synthetic data -- this step can make our R2L model perform *comparably* to the NeRF teacher; (2) Finetune the R2L model in (1) with the *real* data -- this step will further boost the performance and make our R2L model *outperform* the NeRF teacher.
 
 The detailed step-by-step training pipeline is as follows.
 
@@ -73,13 +79,13 @@ In this code we refer to the following implementations: [nerf-pytorch](https://g
 
 ## Reference
 
-If our work or code helps you, please consider citing our paper. Thank you!
+If our work or code helps you, please consider to cite our paper. Thank you!
 
-    @article{wang2022r2l,
-      Author = {Huan Wang and Jian Ren and Zeng Huang and Kyle Olszewski and Menglei Chai and Yun Fu and Sergey Tulyakov},
-      Title = {R2L: Distilling Neural Radiance Field to Neural Light Field for Efficient Novel View Synthesis},
-      Booktitle = {ECCV},
-      Year = {2022}
+    @inproceedings{wang2022r2l,
+      author = {Huan Wang and Jian Ren and Zeng Huang and Kyle Olszewski and Menglei Chai and Yun Fu and Sergey Tulyakov},
+      title = {R2L: Distilling Neural Radiance Field to Neural Light Field for Efficient Novel View Synthesis},
+      booktitle = {ECCV},
+      year = {2022}
     }
 
 
