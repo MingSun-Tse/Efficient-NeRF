@@ -12,7 +12,7 @@ This repository is for the new neral light field (NeLF) method introduced in the
 > [1] Snap Inc. [2] Northeastern University \
 > Work done when Huan was an intern at Snap Inc.
 
-**[TLDR]** We present R2L, a deep (88-layer) residual MLP network that can represent the neural *light* field (NeLF) of complex synthetic and real-world scenes. It is featured by compact representation size (~20MB storage size), faster rendering speed (~30x speedup than NeRF), significantly improved visual quality (1.4dB boost than NeRF), with no whistles and bells (no special data structure or parallelism required).
+**[TL;DR]** We present R2L, a deep (88-layer) residual MLP network that can represent the neural *light* field (NeLF) of complex synthetic and real-world scenes. It is featured by compact representation size (~20MB storage size), faster rendering speed (~30x speedup than NeRF), significantly improved visual quality (1.4dB boost than NeRF), with no whistles and bells (no special data structure or parallelism required).
 
 <center><img src="frontpage.png" width="700" hspace="10"></center>
 
@@ -34,32 +34,33 @@ sh scripts/download_data_v2.sh
 ```bash
 CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/chair_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/chair_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --use_residual --cache_ignore data --trial.ON --trial.body_arch resmlp --pretrained_ckpt R2L_models/W256D88__blender_chair__400x400.tar --render_only --render_test --testskip 1 --project Test__R2L_W256D88__blender_chair__400x400
 ```  
-Here we only show the example of scene chair. You may test on other scenes simply by changing all the `chair` word segments to other scene names.
+Here we only show the example of scene `chair`. You may test on other scenes simply by changing all the `chair` word segments to other scene names.
  
-
-
 ### 4. Train R2L models
 There are two major steps in R2L training. (1) Use *pretrained* NeRF model to generate synthetic data and train R2L network on the synthetic data -- this step can make our R2L model perform *comparably* to the NeRF teacher; (2) Finetune the R2L model in (1) with the *real* data -- this step will further boost the performance and make our R2L model *outperform* the NeRF teacher.
 
 The detailed step-by-step training pipeline is as follows.
 
 Step 1. Pretrain a NeRF model (we simply follow the instructions [here](https://github.com/yenchenlin/nerf-pytorch))
-```bash
 
+Here we only show the example of scene `chair`. You may test on other scenes simply by changing all the `chair` word segments to other scene names.
+```bash
+CUDA_VISIBLE_DEVICES=0 python3 run_nerf.py --config configs/chair.txt --screen --cache_ignore data,__pycache__,torchsearchsorted,imgs --project nerf__blender_chair__400x400
 ```
 
 Step 2. Use the pretrained NeRF model to generate synthetic data (saved in .npy format):
 ```bash
+CUDA_VISIBLE_DEVICES=0 python3 run_nerf_create_data.py --create_data rand --config configs/chair.txt --teacher_ckpt Experiments/nerf__blender_chair__400x400*/weights/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/chair:data/nerf_synthetic/chair_R2LData_400x400_Images10000 --screen --project nerf__blender_chair__CreateData --cache_ignore data,__pycache__,torchsearchsorted,imgs
 
 ```
 Step 3. Train R2L model on the synthetic data:
 ```bash
-
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name R2L --config configs/chair_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/chair_R2LData_400x400_Images10000 --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --trial.ON --trial.body_arch resmlp --num_worker 8 --warmup_lr 0.0001,200 --cache_ignore data,__pycache__,torchsearchsorted,imgs --screen --project R2L__blender_chair__400x400
 ```
 
 Step 4. Convert original real data (images) to our .npy format:
 ```bash
-
+python convert_original_data_to_rays_blender.py --splits train --datadir data/nerf_synthetic/chair
 ```
 
 Step 5. Finetune the R2L model in Step 3 on the data in Step 4:
