@@ -50,7 +50,7 @@ CUDA_VISIBLE_DEVICES=0 python3 run_nerf.py --config configs/chair.txt --screen -
 
 Step 2. Use the pretrained NeRF model to generate synthetic data (saved in .npy format):
 ```bash
-CUDA_VISIBLE_DEVICES=0 python3 run_nerf_create_data.py --create_data rand --config configs/chair.txt --teacher_ckpt Experiments/nerf__blender_chair__400x400*/weights/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/chair:data/nerf_synthetic/chair_R2LData_400x400_Images10000 --screen --project nerf__blender_chair__CreateData --cache_ignore data,__pycache__,torchsearchsorted,imgs
+CUDA_VISIBLE_DEVICES=0 python3 run_nerf_create_data.py --create_data rand --config configs/chair.txt --teacher_ckpt Experiments/nerf__blender_chair__400x400*/weights/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/chair:data/nerf_synthetic/chair_R2LData_400x400_Images10000 --screen --cache_ignore data,__pycache__,torchsearchsorted,imgs --project nerf__blender_chair__CreateData
 
 ```
 Step 3. Train R2L model on the synthetic data:
@@ -65,13 +65,12 @@ python convert_original_data_to_rays_blender.py --splits train --datadir data/ne
 
 Step 5. Finetune the R2L model in Step 3 on the data in Step 4:
 ```bash
-
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name R2L --config configs/chair_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/chair_train_Rand_Origins_Dirs_4096RaysPerNpy_800x800 --n_pose_video 20,1,1 --N_iters 1600000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --cache_ignore data,__pycache__,torchsearchsorted,imgs  --screen --trial.ON --trial.body_arch resmlp --num_worker 8 --warmup_lr 0.0001,200 --save_intermediate_models --pretrained_ckpt Experiments/R2L__blender_chair__400x400_SERVER*/weights/ckpt_1200000.tar --resume --project R2L__blender_chair__400x400__ft
 ```
 Note, this step is pretty fast and prone to overfitting, so do not finetune it too much. We simply set the finetuning steps based on our validation.
 
 
 ## Results
-
 See more results and videos on our [project webpage](https://snap-research.github.io/R2L/).
 
 
