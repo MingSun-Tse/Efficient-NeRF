@@ -120,10 +120,9 @@ parser.add_argument('--cache_ignore', type=str, default='')
 parser.add_argument('--note', type=str, default='')
 parser.add_argument('--resume_ExpID', type=str, default='')
 
-# @mst: related to nerf_v2
-parser.add_argument('--model_name', type=str, default='nerf_v2', 
-        choices=['nerf', 'nerf_v2', 'nerf_v3', 'nerf_v3.2', 'nerf_v3.3', 'nerf_v3.4', 'nerf_v3.4.2', 'nerf_v3.6', 'nerf_v3.7',
-        'nerf_v3.5', 'nerf_v3.8', 'nerf_v4', 'nerf_v6', 'nerf_v6_enhance', 'nerf_v7'])
+# @mst: related to R2L method
+parser.add_argument('--model_name', type=str, default='R2L', 
+        choices=['nerf', 'nerf_v3.2', 'R2L'])
 parser.add_argument('--N_iters', type=int, default=200000)
 parser.add_argument('--skips', type=str, default='4')
 parser.add_argument('--D_head', type=int, default=4)
