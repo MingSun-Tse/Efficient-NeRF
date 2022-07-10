@@ -15,7 +15,7 @@ This repository is for the new neral light field (NeLF) method introduced in the
 **[TL;DR]** We present R2L, a deep (88-layer) residual MLP network that can represent the neural *light* field (NeLF) of complex synthetic and real-world scenes. It is featured by compact representation size (~20MB storage size), faster rendering speed (~30x speedup than NeRF), significantly improved visual quality (1.4dB boost than NeRF), with no whistles and bells (no special data structure or parallelism required).
 
 <div align="center">
-    <a><img src="figs/frontpage.png"  width="600" ></a>
+    <a><img src="figs/frontpage.png"  width="700" ></a>
 </div>
 
 
@@ -75,8 +75,8 @@ Note, this step is pretty fast and prone to overfitting, so do not finetune it t
 ## Results
 The quantitative and qualitative comparison are shown below. See more results and videos on our [project webpage](https://snap-research.github.io/R2L/).
 <div align="center">
-    <a><img src="figs/blender_psnr_comparison.png"  width="600" ></a>
-    <a><img src="figs/blender_visual_comparison.png"  width="600" ></a>
+    <a><img src="figs/blender_psnr_comparison.png"  width="700" ></a>
+    <a><img src="figs/blender_visual_comparison.png"  width="700" ></a>
 </div>
 
 
