@@ -25,7 +25,6 @@ rot_theta = lambda th : torch.Tensor([
     [np.sin(th),0, np.cos(th),0],
     [0,0,0,1]]).float()
 
-
 def pose_spherical(theta, phi, radius):
     c2w = trans_t(radius)
     c2w = rot_phi(phi / 180. * np.pi) @ c2w
@@ -36,14 +35,6 @@ def pose_spherical(theta, phi, radius):
                 [ 0,1,0,0],
                 [ 0,0,0,1]]) @ c2w
     return c2w
-
-def pose_spherical_inv(c2w):
-    r"""TODO-@mst: invert c2w to theta, phi, radius
-    """
-    pass
-    assert (pose_spherical(theta, phi, radius) - c2w).abs().sum() == 0 # check
-    return theta, phi, radius
-
 
 def load_blender_data(basedir, half_res=False, testskip=1, n_pose=40, perturb=False):
     splits = ['train', 'val', 'test']
@@ -202,27 +193,6 @@ def save_blender_data(datadir, poses, images, split='train'):
         data['frames'] = frames
         json.dump(data, f, indent=4)
 
-def load_blender_data_v2(datadir, half_res=False, white_bkgd=True, split='train'):
-    '''Load data with psuedo data. Deprecated now -- use data loader with .npy'''
-    with open(os.path.join(datadir, 'transforms_{}.json'.format(split)), 'r') as fp:
-        meta = json.load(fp)
-
-    poses, imgs = [], []
-    for ix, frame in enumerate(meta['frames']):
-        fname = os.path.join(datadir, frame['file_path'] + '.png')
-        img = np.array(imageio.imread(fname)).astype(np.float32) / 255.
-        pose = np.array(frame['transform_matrix']).astype(np.float32)
-        
-        if 'pseudo' not in fname: # real-world data
-            if half_res:
-                H, W = img.shape[:2]
-                img = cv2.resize(img, (H//2, W//2), interpolation=cv2.INTER_AREA)
-            img = img[..., :3] * img[..., -1:] + (1. - img[..., -1:]) if white_bkgd else img[..., :3] 
-                
-        imgs.append(img)
-        poses.append(pose)
-    return np.array(imgs), np.array(poses)
-
 # Use dataloader to load data
 def is_img(x):
     _, ext = os.path.splitext(x)
@@ -251,7 +221,7 @@ class BlenderDataset(Dataset):
 
     def __len__(self):
         return len(self.frames)
-
+        
 class BlenderDataset_v2(Dataset):
     r"""Load data of ray origins and directions. This is the most straightforward way.
     """
@@ -302,53 +272,6 @@ class BlenderDataset_v2(Dataset):
     def __len__(self):
         return len(self.all_splits)
 
-class BlenderDataset_v3(Dataset):
-    '''Load 16x16 patch data.'''
-    def __init__(self, datadir):
-        self.datadir = datadir
-        self.all_imgs = [f'{datadir}/{x}' for x in os.listdir(datadir) if os.path.isdir(f'{datadir}/{x}') and x.startswith('img_')]
-        self.n_patch_per_img = len(os.listdir(self.all_imgs[0])) - 1
-        print(f'Load data done. #All files: {len(self.all_imgs)}')
-
-    def __getitem__(self, index):
-        img_folder = self.all_imgs[index]
-        rays_o_path = f'{img_folder}/rays_o.npy'
-        rays_o = torch.Tensor(np.load(rays_o_path)) # [3]
-        
-        rand_ix = np.random.randint(self.n_patch_per_img) # pick one patch randomly in each image folder
-        patch_path = f'{img_folder}/patch_{rand_ix}.npy'
-        data = torch.Tensor(np.load(patch_path)) # [16, 16, 6]
-        rays_d, rgb = data[..., :3], data[..., 3:6] # both: [16, 16, 3]
-        rays_o = rays_o[None, None, :].expand(data.shape[0], data.shape[1], 3) # [16, 16, 3]
-        return rays_o, rays_d, rgb
-    
-    def __len__(self):
-        return len(self.all_imgs)
-
-class BlenderDataset_v4(Dataset):
-    '''Load 16x16patches_v2 data.'''
-    def __init__(self, datadir):
-        self.datadir = datadir
-        self.all_imgs = [f'{datadir}/{x}' for x in os.listdir(datadir) if x.endswith('_rays_d.npy')]
-        # check num of files, only continue when it meets a predefined number
-        while len(self.all_imgs) < 225000: # this is the rough number of rays_d.npy files that can be generated in 1 hr (3600/10*625)
-            time.sleep(30)
-        print(f'Load data done. #All files: {len(self.all_imgs)}')
-
-    def __getitem__(self, index):
-        patch_path = self.all_imgs[index]
-        img_ix = patch_path.split('/')[-1].split('_')[0] # e.g., img9
-        rays_o_path = f'{self.datadir}/{img_ix}_rays_o.npy'
-        rays_o = torch.Tensor(np.load(rays_o_path)) # [3]
-        
-        data = torch.Tensor(np.load(patch_path)) # [16, 16, 6]
-        rays_d, rgb = data[..., :3], data[..., 3:6] # both: [16, 16, 3]
-        rays_o = rays_o[None, None, :].expand(data.shape[0], data.shape[1], 3) # [16, 16, 3]
-        return rays_o, rays_d, rgb
-    
-    def __len__(self):
-        return len(self.all_imgs)
-
 def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
     '''Even-spaced sampling'''
     near, far = 2, 6
@@ -371,16 +294,6 @@ def get_novel_poses(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
             radiuses = np.linspace(near, far, int(value)+2)[1:-1] if mode == 'sample' else [float(value)]
     novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
     return to_tensor(novel_poses)
-
-def get_novel_poses_v2(args, n_pose, theta1=-180, theta2=180, phi1=-90, phi2=0):
-    '''Random sampling. Deprecated since radius should be fixed at 4.
-    '''
-    near, far = 2, 6
-    thetas = theta1 + np.random.rand(n_pose[0]) * (theta2 - theta1)
-    phis = phi1 + np.random.rand(n_pose[1]) * (phi2 - phi1)
-    radiuses = near + np.random.rand(n_pose[2]) * (far - near)
-    novel_poses = torch.stack([pose_spherical(t, p, r) for r in radiuses for p in phis for t in thetas], 0)
-    return novel_poses
 
 def get_rand_pose():
     '''Random sampling. Random origins and directions.

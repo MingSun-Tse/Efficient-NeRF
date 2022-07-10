@@ -161,23 +161,7 @@ def render_path_spiral(c2w, up, rads, focal, zdelta, zrate, rots, N):
     # render_poses = [get_rand_pose_v2().data.cpu().numpy() for _ in range(N)]
     return render_poses
 
-
 # @mst
-def get_rand_pose():
-    # -- pass local variables
-    rads, c2w, up, focal = GLOBALS['rads'], GLOBALS['c2w'], GLOBALS['up'], GLOBALS['focal']
-    rots, zrate = 2, 0.5
-    hwf = c2w[:,4:5]
-    # --
-    theta1, theta2 = 0, 2. * np.pi * rots
-    theta = theta1 + np.random.rand() * (theta2 - theta1)
-    c = np.dot(c2w[:3,:4], np.array([np.cos(theta), -np.sin(theta), -np.sin(theta*zrate), 1.]) * rads) 
-    z = normalize(c - np.dot(c2w[:3,:4], np.array([0,0,-focal, 1.])))
-    pose = np.concatenate([viewmatrix(z, up, c), hwf], 1)
-    return to_tensor(pose)
-
-
-# @mst: prior version does not work well
 def get_rand_pose_v2():
     # -- pass local variables
     c2w, up, focal, poses = GLOBALS['c2w'], GLOBALS['up'], GLOBALS['focal'], GLOBALS['poses']
