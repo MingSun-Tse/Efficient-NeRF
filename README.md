@@ -75,8 +75,7 @@ Note, this step is pretty fast and prone to overfitting, so do not finetune it t
 ## Results
 The quantitative and qualitative comparison are shown below. See more results and videos on our [project webpage](https://snap-research.github.io/R2L/).
 <div align="center">
-    <a><img src="figs/blender_psnr_comparison.png"  width="700" ></a>
-    </b>
+    <a><img src="figs/blender_psnr_comparison.png"  width="700" ></a><br>
     <a><img src="figs/blender_visual_comparison.png"  width="700"></a>
 </div>
 
