@@ -22,7 +22,7 @@ This repository is for the new neral light field (NeLF) method introduced in the
 ## Reproducing Our Results
 ### 1. Set up (original) data
 ```bash
-sh scripts/download_data_v2.sh
+sh scripts/download_data.sh
 ```
 
 ### 2. Set up environment with Anaconda
@@ -34,7 +34,7 @@ sh scripts/download_data_v2.sh
 - Download our trained models here.
 - Run
 ```bash
-CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf_v3.2 --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --use_residual --cache_ignore data --trial.ON --trial.body_arch resmlp --pretrained_ckpt R2L_models/W256D88__blender_lego__400x400.tar --render_only --render_test --testskip 1 --project Test__R2L_W256D88__blender_lego__400x400
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name R2L --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/lego_v8_Rand_Origins_Dirs_4096RaysPerNpy_10kImages --use_residual --cache_ignore data --trial.ON --trial.body_arch resmlp --pretrained_ckpt R2L_models/W256D88__blender_lego__400x400.tar --render_only --render_test --testskip 1 --project Test__R2L_W256D88__blender_lego__400x400
 ```  
 Here we only show the example of scene `lego`. You may test on other scenes simply by changing all the `lego` word segments to other scene names.
  
