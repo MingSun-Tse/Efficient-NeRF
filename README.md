@@ -14,7 +14,9 @@ This repository is for the new neral light field (NeLF) method introduced in the
 
 **[TL;DR]** We present R2L, a deep (88-layer) residual MLP network that can represent the neural *light* field (NeLF) of complex synthetic and real-world scenes. It is featured by compact representation size (~20MB storage size), faster rendering speed (~30x speedup than NeRF), significantly improved visual quality (1.4dB boost than NeRF), with no whistles and bells (no special data structure or parallelism required).
 
-<center><img src="frontpage.png" width="700" hspace="10"></center>
+<div align="center">
+    <a><img src="figs/frontpage.png"  width="700" ></a>
+</div>
 
 
 ## Reproducing Our Results
