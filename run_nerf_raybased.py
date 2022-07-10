@@ -16,8 +16,8 @@ from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, BlenderDataset, BlenderDataset_v2, get_novel_poses
 import lpips as lpips_
-from ssim_torch import ssim as ssim_
-from flip_loss import FLIP; flip = FLIP()
+from utils.ssim_torch import ssim as ssim_
+from utils.flip_loss import FLIP; flip = FLIP()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
@@ -26,8 +26,7 @@ DEBUG = False
 # ---------------------------------
 # Set up logging directories
 from logger import Logger
-from utils import Timer, LossLine, PresetLRScheduler, strdict_to_dict, _weights_init_orthogonal, get_n_params_, get_n_flops_
-from utils import AverageMeter, ProgressMeter
+from utils.utils import Timer, LossLine, get_n_params_, get_n_flops_, AverageMeter, ProgressMeter
 from option import args
 
 logger   = Logger(args)
@@ -975,10 +974,6 @@ def train():
     if use_batching:
         rays_rgb = torch.Tensor(rays_rgb).to(device)
 
-    # @mst: use our own lr scheduler
-    if args.lr:
-        lr_scheduler = PresetLRScheduler(strdict_to_dict(args.lr, ttype=float))
-
     if args.hard_ratio:
         hard_rays = to_tensor([])
 
@@ -1156,8 +1151,7 @@ def train():
             loss_rgb = img2mse(rgb[:, :3], target_s[:, :3]) * args.lw_rgb
             psnr = mse2psnr(loss_rgb)
             loss_line.update('psnr', psnr.item(), '.4f')
-            if not (args.enhance_cnn and args.freeze_pretrained):
-                loss += loss_rgb
+            loss += loss_rgb
             
             # smoothing for log print
             if not math.isinf(psnr.item()):
@@ -1206,16 +1200,6 @@ def train():
                     save_path = f'{logger.gen_img_path}/rgb1_{ExpID}_iter{i}_img{ix}.png'
                     imageio.imwrite(save_path, to8b(img))
 
-        # check gradients to make sure group_l2 works normally
-        if args.group_l2 and i % (args.i_print * 10) == 0:
-            n_neuron_print = 10
-            print(f'iter {i} neuron norms (penalty factor {args.group_l2}):')
-            for name, m in model.named_modules():
-                if isinstance(m, (nn.Linear)):
-                    logstr = ['%.6f' % x for x in torch.norm(m.weight.data, p=2, dim=-1)[:n_neuron_print]]
-                    logstr = f'{name:<22s} ' + ' '.join(logstr)
-                    netprint(logstr)
-        
         # test: using the splitted test images
         if i % args.i_testset == 0:
             testsavedir = f'{logger.gen_img_path}/testset_{ExpID}_iter{i}' # save the renderred test images

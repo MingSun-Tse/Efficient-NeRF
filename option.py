@@ -1,7 +1,7 @@
 from random import choice
 from numpy.random import default_rng
 import configargparse
-from utils import check_path, strdict_to_dict
+from utils.utils import check_path, strdict_to_dict
 
 parser = configargparse.ArgumentParser()
 parser.add_argument('--config', is_config_file=True, 
@@ -167,10 +167,8 @@ parser.add_argument('--i_update_data', type=int, default=1000000000,
 parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0.9')
 parser.add_argument('--pseudo_ratio', type=float, default=-1.)
 parser.add_argument('--init', type=str, default='default', choices=['default', 'orth'])
-parser.add_argument('--teacher_targets_save_path', type=str, default='teacher_targets.npy')
 parser.add_argument('--trans_origin', type=str, default='')
 parser.add_argument('--select_pixel_mode', type=str, default='rand_pixel', choices=['rand_pixel', 'rand_patch'])
-parser.add_argument('--enhance_cnn', type=str, default='', choices=['', 'EDSR', 'RCAN'])
 parser.add_argument('--freeze_pretrained', action='store_true')
 parser.add_argument('--focal_scale', type=float, default=1.)
 parser.add_argument('--data_mode', type=str, default='images', choices=['images', 'rays', 'images_new', '16x16patches',
@@ -183,12 +181,6 @@ parser.add_argument('--hard_ratio', type=str, default='',
         help='hard rays ratio in a batch; seperated by comma')
 parser.add_argument('--hard_mul', type=float, default=1,
         help='hard_mul * batch_size is the size of hard ray pool')
-parser.add_argument('--group_l2', type=float, default=0,
-        help='group_l2 regularization factor')
-parser.add_argument('--pruner', type=str, default='',
-        help='name of pruner')
-parser.add_argument('--stage_pr', type=str, default='',
-        help='to assign layer-wise pruning ratio')
 parser.add_argument('--previous_layers', type=str, default='')
 parser.add_argument('--use_residual', action='store_true')
 parser.add_argument('--linear_tail', action='store_true')
@@ -196,12 +188,6 @@ parser.add_argument('--layerwise_netwidths', type=str, default='')
 parser.add_argument('--layerwise_netwidths2', type=str, default='')
 parser.add_argument('--render_iters', type=int, default=1,
         help='the number of forwards when rendering one image') 
-parser.add_argument('--forward_scale', type=float, default=1.,
-        help='used in nerf_v4')
-parser.add_argument('--branch_loc', type=int, default=9)
-parser.add_argument('--branchwidth', type=int, default=256)
-parser.add_argument('--branchdepth', type=int, default=3)
-parser.add_argument('--num_shared_pixels', type=int, default=4)
 parser.add_argument('--convert_to_onnx', action='store_true')
 parser.add_argument('--benchmark', action='store_true',
         help='check inference speed (time of rendering a frame) with a trained model')
@@ -217,9 +203,6 @@ parser.add_argument('--shuffle_input', action='store_true')
 parser.add_argument('--kernel_size', type=int, default=1)
 parser.add_argument('--padding', type=int, default=0)
 parser.add_argument('--body_arch', type=str, default='conv', choices=['conv', 'resblock'])
-parser.add_argument('--enhance_width', type=int, default=64)
-parser.add_argument('--enhance_n_resblock', type=int, default=5)
-parser.add_argument('--enhance_separate_train', action='store_true')
 parser.add_argument('--lw_rgb', type=float, default=1)
 parser.add_argument('--lw_rgb1', type=float, default=1)
 parser.add_argument('--iter_size', type=int, default=1)
@@ -247,7 +230,6 @@ parser.add_argument('--trial.n_learnable', type=int, default=2, help='num of lea
 parser.add_argument('--trial.inact', default='relu', choices=['none', 'relu', 'lrelu'], help='the within activation func in a block')
 parser.add_argument('--trial.outact', default='none', choices=['none', 'relu', 'lrelu'], help='the output activation func in a block')
 parser.add_argument('--trial.n_block', type=int, default=-1, help='num of block in network body')
-parser.add_argument('--trial.send_results', action='store_true')
 parser.add_argument('--trial.near', type=float, default=-1)
 parser.add_argument('--trial.far', type=float, default=-1)
 
@@ -268,7 +250,6 @@ def check_n_pose(n_pose):
 args.n_pose_kd = check_n_pose(args.n_pose_kd)
 args.n_pose_video = check_n_pose(args.n_pose_video)
 args.pretrained_ckpt = check_path(args.pretrained_ckpt)
-args.teacher_ckpt = check_path(args.teacher_ckpt)
 
 if args.hard_ratio != '':
     if ',' not in args.hard_ratio:
@@ -276,17 +257,6 @@ if args.hard_ratio != '':
     else:
         args.hard_ratio = [float(x) for x in args.hard_ratio.split(',')]
 
-# some default args to keep compatibility
-args.wg = 'filter'
-args.pick_pruned = 'min'
-args.base_pr_model = None
-args.index_layer = 'name_matching'
-args.skip_layers = ''
-args.previous_layers = ''
-args.arch = 'mlp'
-args.stage_pr = strdict_to_dict(args.stage_pr, float)
-args.orth_reg_iter = -1
-
-# use Huan's latest args update feature, easier for controlling irrelevant args
-from utils import update_args
+# easier for controlling irrelevant args
+from utils.utils import update_args
 args = update_args(args)
