@@ -1,5 +1,7 @@
 # R2L: Distilling NeRF to NeLF
 
+### [Project](https://snap-research.github.io/R2L/) | [arXiv](https://arxiv.org/abs/2203.17261) | [PDF](https://arxiv.org/pdf/2203.17261.pdf) 
+
 <div align="center">
     <a><img src="figs/snap.svg"  height="120px" ></a>
     &nbsp
@@ -7,9 +9,9 @@
 </div>
 
 This repository is for the new neral light field (NeLF) method introduced in the following ECCV'22 paper:
-> **R2L: Distilling Neural Radiance Field to Neural Light Field for Efficient Novel View Synthesis [[Arxiv](https://arxiv.org/abs/2203.17261)] [[Project](https://snap-research.github.io/R2L/)]** \
-> [Huan Wang](http://huanwang.tech/) [1,2], [Jian Ren](https://alanspike.github.io/) [1], [Zeng Huang](https://zeng.science/) [1], [Kyle Olszewski](https://kyleolsz.github.io/) [1], [Menglei Chai](https://mlchai.com/) [1], [Yun Fu](http://www1.ece.neu.edu/~yunfu/) [2], and [Sergey Tulyakov](http://www.stulyakov.com/) [1] \
-> [1] Snap Inc. [2] Northeastern University \
+> **[R2L: Distilling Neural Radiance Field to Neural Light Field for Efficient Novel View Synthesis](https://snap-research.github.io/R2L/)** \
+> [Huan Wang](http://huanwang.tech/) <sup>1,2</sup>, [Jian Ren](https://alanspike.github.io/) <sup>1</sup>, [Zeng Huang](https://zeng.science/) <sup>1</sup>, [Kyle Olszewski](https://kyleolsz.github.io/) <sup>1</sup>, [Menglei Chai](https://mlchai.com/) <sup>1</sup>, [Yun Fu](http://www1.ece.neu.edu/~yunfu/) <sup>2</sup>, and [Sergey Tulyakov](http://www.stulyakov.com/) <sup>1</sup> \
+> <sup>1</sup> Snap Inc. <sup>2</sup> Northeastern University \
 > Work done when Huan was an intern at Snap Inc.
 
 **[TL;DR]** We present R2L, a deep (88-layer) residual MLP network that can represent the neural *light* field (NeLF) of complex synthetic and real-world scenes. It is featured by compact representation size (~20MB storage size), faster rendering speed (~30x speedup than NeRF), significantly improved visual quality (1.4dB boost than NeRF), with no whistles and bells (no special data structure or parallelism required).
@@ -81,7 +83,7 @@ The quantitative and qualitative comparison are shown below. See more results an
 
 
 ## Acknowledgments
-In this code we refer to the following implementations: [nerf-pytorch](https://github.com/yenchenlin/nerf-pytorch), [smilelogging](https://github.com/MingSun-Tse/smilelogging). Great thanks to them! We especially thank [nerf-pytorch](https://github.com/yenchenlin/nerf-pytorch). Our code largely builds upon their wonderful implementation. We also greatly thank the anounymous ECCV'22 reviewers for the constructive comments to help us improve the paper.
+In this code we refer to the following implementations: [nerf-pytorch](https://github.com/yenchenlin/nerf-pytorch) and [smilelogging](https://github.com/MingSun-Tse/smilelogging). Great thanks to them! We especially thank [nerf-pytorch](https://github.com/yenchenlin/nerf-pytorch). Our code is largely built upon their wonderful implementation. We also greatly thank the anounymous ECCV'22 reviewers for the constructive comments to help us improve the paper.
 
 ## Reference
 
