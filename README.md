@@ -1,7 +1,7 @@
 # R2L: Distilling NeRF to NeLF
 
 <div align="center">
-    <a><img src="figs/snap.png"  height="120px" ></a>
+    <a><img src="figs/snap.svg"  height="120px" ></a>
     &nbsp
     <a><img src="figs/smile.png"  height="120px" ></a>
 </div>
