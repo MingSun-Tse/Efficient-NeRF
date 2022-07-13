@@ -1,6 +1,6 @@
 # R2L: Distilling NeRF to NeLF
 
-### [Project](https://snap-research.github.io/R2L/) | [arXiv](https://arxiv.org/abs/2203.17261) | [PDF](https://arxiv.org/pdf/2203.17261.pdf) 
+### [Project](https://snap-research.github.io/R2L/) | [ArXiv](https://arxiv.org/abs/2203.17261) | [PDF](https://arxiv.org/pdf/2203.17261.pdf) 
 
 <div align="center">
     <a><img src="figs/snap.svg"  height="120px" ></a>

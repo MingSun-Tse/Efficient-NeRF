@@ -8,17 +8,17 @@ import torch.nn.functional as F
 from run_nerf_raybased_helpers import NeRF, sample_pdf, ndc_rays, get_rays, get_embedder
 from run_nerf_raybased_helpers import to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights
 
-from load_llff import load_llff_data
-from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data, setup_blender_datadir_v2 as setup_blender_datadir, save_blender_data, get_novel_poses
+from dataset.load_llff import load_llff_data
+from dataset.load_deepvoxels import load_dv_data
+from dataset.load_blender import load_blender_data, setup_blender_datadir_v2 as setup_blender_datadir, save_blender_data, get_novel_poses
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
 DEBUG = False
 
 # set up logging directories -------
-from logger import Logger
-from utils import Timer
+from utils.logger import Logger
+from utils.utils import Timer
 from option import args
 
 logger = Logger(args)

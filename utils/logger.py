@@ -1,8 +1,5 @@
 import time, math, os, sys, copy, numpy as np, shutil as sh
-import matplotlib; matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from utils.utils import get_project_path, mkdirs
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+from .utils import get_project_path, mkdirs
 from collections import OrderedDict
 import json, yaml
 import logging
