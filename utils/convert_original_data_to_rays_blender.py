@@ -88,7 +88,7 @@ if 'ficus' in args.datadir:
 splits = args.splits.split(',')
 datadir = args.datadir
 prefix = ''.join(splits)
-savedir = f'{os.path.normpath(datadir)}_{prefix}_Rand_Origins_Dirs_{split_size}RaysPerNpy{args.suffix}'
+savedir = f'{os.path.normpath(datadir)}_real_{prefix}{args.suffix}'
 os.makedirs(savedir, exist_ok=True)
 
 # Load all train/val images

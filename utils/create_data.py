@@ -1,12 +1,13 @@
 import os, sys, copy
+sys.path.insert(0, './')
 import numpy as np
 import imageio, shutil
 import time
 import torch
 import torch.nn.functional as F
 
-from run_nerf_raybased_helpers import NeRF, sample_pdf, ndc_rays, get_rays, get_embedder
-from run_nerf_raybased_helpers import to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights
+from model.nerf_raybased import NeRF
+from run_nerf_raybased_helpers import to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights, sample_pdf, ndc_rays, get_rays, get_embedder
 
 from dataset.load_llff import load_llff_data
 from dataset.load_deepvoxels import load_dv_data
@@ -511,7 +512,7 @@ def train():
         else:
             images = images[...,:3]
 
-        from load_blender import get_rand_pose
+        from dataset.load_blender import get_rand_pose
 
     elif args.dataset_type == 'deepvoxels':
 

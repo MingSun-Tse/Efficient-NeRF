@@ -22,6 +22,12 @@ This repository is for the new neral light field (NeLF) method introduced in the
 
 
 ## Reproducing Our Results
+### 0. Download the code
+```
+git clone git@github.com:snap-research/R2L.git && cd R2L
+```
+
+
 ### 1. Set up (original) data
 ```bash
 sh scripts/download_example_data.sh
@@ -40,7 +46,7 @@ sh scripts/download_R2L_models.sh
 
 - Run
 ```bash
-CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name R2L --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --use_residual --cache_ignore data --trial.ON --trial.body_arch resmlp --pretrained_ckpt R2L_Blender_Models/lego.tar --render_only --render_test --testskip 1 --project Test__R2L_W256D88__blender_lego
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name R2L --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --use_residual --cache_ignore data --trial.ON --trial.body_arch resmlp --pretrained_ckpt R2L_Blender_Models/lego.tar --render_only --render_test --testskip 1 --screen --project Test__R2L_W256D88__blender_lego
 ```  
 Here we only show the example of scene `lego`. You may test on other scenes simply by changing all the `lego` word segments to other scene names.
  
@@ -64,7 +70,7 @@ sh scripts/download_NeRF_models.sh
 
 For testing these teachers, you can use
 ```bash
-CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf --config configs/lego.txt --pretrained_ckpt NeRF_Blender_Models/lego.tar --render_only --render_test --testskip 1 --project Test__NeRF__blender_lego
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf --config configs/lego.txt --pretrained_ckpt NeRF_Blender_Models/lego.tar --render_only --render_test --testskip 1 --screen --project Test__NeRF__blender_lego
 ```
 
 
@@ -91,13 +97,14 @@ CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name R2L --config con
 #### Step 4. 
 Convert original real data (images) to our `.npy` format:
 ```bash
-python convert_original_data_to_rays_blender.py --splits train --datadir data/nerf_synthetic/lego
+python utils/convert_original_data_to_rays_blender.py --splits train --datadir data/nerf_synthetic/lego
 ```
+The converted data will be saved in `data/nerf_synthetic/lego_real_train`.
 
 #### Step 5. 
 Finetune the R2L model in Step 3 on the data in Step 4:
 ```bash
-CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name R2L --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/lego_realtrain --n_pose_video 20,1,1 --N_iters 1600000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --cache_ignore data,__pycache__,torchsearchsorted,imgs  --screen --trial.ON --trial.body_arch resmlp --num_worker 8 --warmup_lr 0.0001,200 --save_intermediate_models --pretrained_ckpt Experiments/R2L__blender_lego_SERVER*/weights/ckpt_1200000.tar --resume --project R2L__blender_lego__ft
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name R2L --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/lego_real_train --n_pose_video 20,1,1 --N_iters 1600000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --cache_ignore data,__pycache__,torchsearchsorted,imgs --screen --trial.ON --trial.body_arch resmlp --num_worker 8 --warmup_lr 0.0001,200 --save_intermediate_models --pretrained_ckpt Experiments/R2L__blender_lego_SERVER*/weights/ckpt_1200000.tar --resume --project R2L__blender_lego__ft
 ```
 Note, this step is pretty fast and prone to overfitting, so do not finetune it too much. We simply set the finetuning steps based on our validation.
 
