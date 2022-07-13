@@ -891,14 +891,6 @@ def train():
 
     # @mst: get video_targets
     video_targets = None
-    if args.teacher_ckpt:
-        t_ = time.time()
-        print('Get video targets...')
-        if kd_poses is not None and (video_poses - kd_poses).abs().sum() == 0:
-            video_targets = kd_targets
-        else:
-            video_targets = get_teacher_targets_v2(video_poses, H, W, focal, render_kwargs_train, args, pose_tag=args.n_pose_video)
-        print(f'Get video targets done (time: {time.time() - t_:.2f}s)')
 
     # Short circuit if only rendering out from trained model
     if args.render_only:

@@ -271,12 +271,17 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
     return samples
 
 def parse_expid_iter(path):
-    '''parse out experiment id and iteration for pretrained ckpt.
+    r"""Parse out experiment id and iteration for pretrained ckpt.
     path example: Experiments/nerfv2__lego__S4W1024D32Skip8,16,24_DPRGB_KDWRenderPose100All_BS16384_SERVER142-20210704-150540/weights/200000.tar
-    '''
-    expid = 'SERVER' + path.split('_SERVER')[1].split('/')[0]
-    iter = path.split('/')[-1].split('.tar')[0]
-    return expid, iter
+    then, expid is 'SERVER142-20210704-150540'; iter_ is '200000'
+    """
+    if 'SERVER' in path:
+        expid = 'SERVER' + path.split('_SERVER')[1].split('/')[0]
+        iter_ = path.split('/')[-1].split('.tar')[0]
+    else:
+        expid = 'Unknown'
+        iter_ = 'Unknown'
+    return expid, iter_
 
 def load_weights(model, ckpt_path, key):
     from utils import check_path
