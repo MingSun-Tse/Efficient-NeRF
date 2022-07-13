@@ -33,7 +33,7 @@ sh scripts/download_example_data.sh
 - `pip install -r requirements.txt` (We use torch 1.9.0, torchvision 0.10.0)
 
 ### 3. Quick start: test our trained R2L blender models
-- Download our trained models:
+- Download models:
 ```
 sh scripts/download_R2L_trained_models.sh
 ```
