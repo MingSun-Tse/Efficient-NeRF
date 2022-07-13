@@ -32,10 +32,10 @@ sh scripts/download_example_data.sh
 - `conda activate R2L`
 - `pip install -r requirements.txt` (We use torch 1.9.0, torchvision 0.10.0)
 
-### 3. Quick start: test our trained R2L blender models
+### 3. Quick start: test our trained models
 - Download models:
 ```
-sh scripts/download_R2L_trained_models.sh
+sh scripts/download_R2L_models.sh
 ```
 
 - Run
@@ -54,15 +54,34 @@ Train a NeRF model (we simply follow the instructions [here](https://github.com/
 
 Here we only show the example of scene `lego`. You may test on other scenes simply by changing all the `lego` word segments to other scene names.
 ```bash
-CUDA_VISIBLE_DEVICES=0 python3 run_nerf_raybased.py --model_name nerf --config configs/lego.txt --screen --cache_ignore data,__pycache__,torchsearchsorted,imgs --project nerf__blender_lego
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf --config configs/lego.txt --screen --cache_ignore data,__pycache__,torchsearchsorted,imgs --project NeRF__blender_lego
 ```
+
+You can also download the teachers we trained to continue:
+```bash
+sh scripts/download_NeRF_models.sh
+```
+
+For testing these teachers, you can use
+```bash
+CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf --config configs/lego.txt --pretrained_ckpt NeRF_Blender_Models/lego.tar --render_only --render_test --testskip 1 --project Test__NeRF__blender_lego
+```
+
 
 #### Step 2. 
 Use the pretrained NeRF model to generate synthetic data (saved in `.npy` format):
 ```bash
-CUDA_VISIBLE_DEVICES=0 python3 run_nerf_create_data.py --create_data rand --config configs/lego.txt --teacher_ckpt Experiments/nerf__blender_lego*/weights/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_pseudo_images10k --screen --cache_ignore data,__pycache__,torchsearchsorted,imgs --project nerf__blender_lego__CreatePseudoData
-
+CUDA_VISIBLE_DEVICES=0 python utils/create_data.py --create_data rand --config configs/lego.txt --teacher_ckpt Experiments/NeRF__blender_lego*/weights/200000.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_pseudo_images10k --screen --cache_ignore data,__pycache__,torchsearchsorted,imgs --project NeRF__blender_lego__create_pseudo
 ```
+
+If you are using the downloaded teachers, please use this snippet:
+```bash
+CUDA_VISIBLE_DEVICES=0 python utils/create_data.py --create_data rand --config configs/lego.txt --teacher_ckpt NeRF_Blender_Models/lego.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_pseudo_images10k --screen --cache_ignore data,__pycache__,torchsearchsorted,imgs --project NeRF__blender_lego__create_pseudo
+```
+
+The pseudo data will be saved in `data/nerf_synthetic/lego_pseudo_images10k`. Every 4096 rays are saved in one .npy file. For 10k images (400x400 resoltuion), there will be 309600 .npy files.
+
+
 #### Step 3. 
 Train R2L model on the synthetic data:
 ```bash
