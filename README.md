@@ -22,6 +22,8 @@ This repository is for the new neral light field (NeLF) method introduced in the
 
 
 ## Reproducing Our Results
+Below we only show the example of scene `lego`. You may test on other scenes simply by changing all the `lego` word segments to other scene names. Scripts have been doubled-checked. You should be able to **run them simply by copy-paste**.  
+
 ### 0. Download the code
 ```
 git clone git@github.com:snap-research/R2L.git && cd R2L
@@ -48,7 +50,6 @@ sh scripts/download_R2L_models.sh
 ```bash
 CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name R2L --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --use_residual --cache_ignore data --trial.ON --trial.body_arch resmlp --pretrained_ckpt R2L_Blender_Models/lego.tar --render_only --render_test --testskip 1 --screen --project Test__R2L_W256D88__blender_lego
 ```  
-Here we only show the example of scene `lego`. You may test on other scenes simply by changing all the `lego` word segments to other scene names.
  
 ### 4. Train R2L models
 There are two major steps in R2L training. (1) Use *pretrained* NeRF model to generate synthetic data and train R2L network on the synthetic data -- this step can make our R2L model perform *comparably* to the NeRF teacher; (2) Finetune the R2L model in (1) with the *real* data -- this step will further boost the performance and make our R2L model *outperform* the NeRF teacher.
@@ -56,19 +57,17 @@ There are two major steps in R2L training. (1) Use *pretrained* NeRF model to ge
 The detailed step-by-step training pipeline is as follows.
 
 #### Step 1. 
-Train a NeRF model (we simply follow the instructions [here](https://github.com/yenchenlin/nerf-pytorch))
-
-Here we only show the example of scene `lego`. You may test on other scenes simply by changing all the `lego` word segments to other scene names.
+Train a NeRF model:
 ```bash
 CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf --config configs/lego.txt --screen --cache_ignore data,__pycache__,torchsearchsorted,imgs --project NeRF__blender_lego
 ```
 
-You can also download the teachers we trained to continue:
+You can also download the teachers we trained to continue first:
 ```bash
 sh scripts/download_NeRF_models.sh
 ```
 
-For testing these teachers, you can use
+To test the download teachers, you can use
 ```bash
 CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name nerf --config configs/lego.txt --pretrained_ckpt NeRF_Blender_Models/lego.tar --render_only --render_test --testskip 1 --screen --project Test__NeRF__blender_lego
 ```
