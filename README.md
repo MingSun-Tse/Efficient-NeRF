@@ -5,7 +5,7 @@
 <div align="center">
     <a><img src="figs/snap.svg"  height="120px" ></a>
     &nbsp
-    <a><img src="figs/smile.png"  height="120px" ></a>
+    <a><img src="figs/smile.png"  height="100px" ></a>
 </div>
 
 This repository is for the new neral light field (NeLF) method introduced in the following ECCV'22 paper:
@@ -50,7 +50,7 @@ Train a NeRF model (we simply follow the instructions [here](https://github.com/
 
 Here we only show the example of scene `lego`. You may test on other scenes simply by changing all the `lego` word segments to other scene names.
 ```bash
-CUDA_VISIBLE_DEVICES=0 python3 run_nerf.py --config configs/lego.txt --screen --cache_ignore data,__pycache__,torchsearchsorted,imgs --project nerf__blender_lego__400x400
+CUDA_VISIBLE_DEVICES=0 python3 run_nerf_raybased.py --model_name nerf --config configs/lego.txt --screen --cache_ignore data,__pycache__,torchsearchsorted,imgs --project nerf__blender_lego__400x400
 ```
 
 #### Step 2. 
