@@ -1,13 +1,14 @@
-import copy, os
-import torch
-torch.autograd.set_detect_anomaly(True)
+import copy, os, time, math
+from collections import OrderedDict
+
+import numpy as np
+
+import torch; torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn 
 import torch.nn.functional as F
-import numpy as np, time, math
-from collections import OrderedDict
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Misc
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 to_tensor = lambda x: x.to(device) if isinstance(x, torch.Tensor) else torch.Tensor(x).to(device)
 to_array = lambda x: x if isinstance(x, np.ndarray) else x.data.cpu().numpy()
 to_list = lambda x: x if isinstance(x, list) else to_array(x).tolist()

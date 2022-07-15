@@ -1,33 +1,33 @@
-import os, sys, copy, numpy as np, time, random, json, math
+import os, sys, copy, math, random, json, time
+
 import imageio
 from tqdm import tqdm, trange
-import matplotlib.pyplot as plt
+import numpy as np
+import lpips as lpips_
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.benchmark as benchmark
+
 from model.nerf_raybased import NeRF, NeRF_v3_2, PositionalEmbedder, PointSampler
 from run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder, get_rays_np
-from run_nerf_raybased_helpers import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2, get_selected_coords
-from run_nerf_raybased_helpers import undataparallel
+from run_nerf_raybased_helpers import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights_v2, get_selected_coords, undataparallel
 from dataset.load_llff import load_llff_data
 from dataset.load_deepvoxels import load_dv_data
 from dataset.load_blender import load_blender_data, BlenderDataset, BlenderDataset_v2, get_novel_poses
-import lpips as lpips_
 from utils.ssim_torch import ssim as ssim_
 from utils.flip_loss import FLIP; flip = FLIP()
+from utils.logger import Logger
+from utils.utils import Timer, LossLine, get_n_params_, get_n_flops_, AverageMeter, ProgressMeter
+from option import args
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
 DEBUG = False
 
 # ---------------------------------
-# Set up logging directories
-from utils.logger import Logger
-from utils.utils import Timer, LossLine, get_n_params_, get_n_flops_, AverageMeter, ProgressMeter
-from option import args
-
+# Set up logging directories (TODO-@mst: Use smilelogging)
 logger   = Logger(args)
 print    = logger.log_printer.logprint
 accprint = logger.log_printer.accprint
@@ -41,10 +41,11 @@ class MyDataParallel(torch.nn.DataParallel):
         except AttributeError:
             return getattr(self.module, name)
 
-# update ssim and lpips metric functions
+# Update ssim and lpips metric functions
 ssim = lambda img, ref: ssim_(torch.unsqueeze(img, 0), torch.unsqueeze(ref, 0))
 lpips = lpips_.LPIPS(net=args.lpips_net).to(device)
 # ---------------------------------
+
 def batchify(fn, chunk):
     """Constructs a version of 'fn' that applies to smaller batches.
     """
@@ -446,15 +447,7 @@ def create_nerf(args, near, far):
     n_params = get_n_params_(model)
     if args.model_name == 'nerf':
         dummy_input = torch.randn(1, input_ch + input_ch_views).to(device)
-        # -- confirmed with torchsummaryX, fn 'get_n_flops_' works the same as it
-        # from torchsummaryX import summary
-        # summary(model, dummy_input)
-        # --
         n_flops = get_n_flops_(model, input=dummy_input, count_adds=False) * (args.N_samples + args.N_samples +  args.N_importance)
-        # macs, params = get_model_complexity_info(model, dummy_input.shape, as_strings=True,
-        #                                         print_per_layer_stat=True, verbose=True)
-        # print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
-        # print('{:<30}  {:<8}'.format('Number of parameters: ', params))
         
     elif args.model_name in ['nerf_v3.2', 'R2L']:
         dummy_input = torch.randn(1, model.input_dim).to(device)
@@ -483,7 +476,7 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     dists = torch.cat([dists, to_tensor([1e10]).expand(dists[...,:1].shape)], -1)  # [N_rays, N_samples]
     # @mst: 1e10 for infinite distance
 
-    dists = dists * torch.norm(rays_d[...,None,:], dim=-1) # @mst: direction vector needs normalization. why this * ?
+    dists = dists * torch.norm(rays_d[...,None,:], dim=-1)
 
     rgb = torch.sigmoid(raw[...,:3])  # [N_rays, N_samples, 3], RGB for each sampled point 
     noise = 0.
@@ -573,7 +566,7 @@ def render_rays(ray_batch,
     else:
         z_vals = 1./(1./near * (1.-t_vals) + 1./far * (t_vals))
 
-    z_vals = z_vals.expand([N_rays, N_samples]) # @mst: shape: torch.Size([1024, 64]) for train, torch.Size([32768, 64]) for test
+    z_vals = z_vals.expand([N_rays, N_samples])
 
     # @mst: perturbation of depth z, with each depth value at the middle point
     if perturb > 0.:
@@ -733,10 +726,6 @@ def check_onnx(model, onnx_path, dummy_input):
     np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-05)
     print("Exported model has been tested with ONNXRuntime, and the result looks good!")
 
-    # Try to fix bias 'kind:Initializer' bug
-    # onnx_model.graph.ClearField('initializer')
-    # onnx.save_model(onnx_model, onnx_path)
-
 def train():
     # Load data
     if args.dataset_type == 'llff':
@@ -859,9 +848,6 @@ def train():
     netprint(avg_video_pose)
     netprint(f'avg_train_pose:')
     netprint(avg_train_pose)
-    # video_poses[:, :3, 3].norm(dim=1)
-    # train_poses[:, :3, 3].norm(dim=1)
-    # test_poses[:, :3, 3].norm(dim=1)
 
     # data sketch
     print(f'{len(i_train)} original train views are [{" ".join([str(x) for x in i_train])}]')
@@ -979,23 +965,19 @@ def train():
         loss_line = LossLine()
         loss, rgb1 = 0, None
 
-        # update LR
-        if args.lr: # use our own lr schedule
-            new_lrate = lr_scheduler(optimizer, global_step)
+        decay_rate = 0.1
+        decay_steps = args.lrate_decay * 1000
+        
+        if args.warmup_lr: # @mst: example '0.0001,2000'
+            start_lr, end_iter = [float(x) for x in args.warmup_lr.split(',')]
+            if global_step < end_iter: # increase lr until args.lrate
+                new_lrate = (args.lrate - start_lr) / end_iter * global_step + start_lr
+            else: # decrease lr as before
+                new_lrate = args.lrate * (decay_rate ** ((global_step - end_iter) / decay_steps))
         else:
-            decay_rate = 0.1
-            decay_steps = args.lrate_decay * 1000
-            
-            if args.warmup_lr: # @mst: example '0.0001,2000'
-                start_lr, end_iter = [float(x) for x in args.warmup_lr.split(',')]
-                if global_step < end_iter: # increase lr until args.lrate
-                    new_lrate = (args.lrate - start_lr) / end_iter * global_step + start_lr
-                else: # decrease lr as before
-                    new_lrate = args.lrate * (decay_rate ** ((global_step - end_iter) / decay_steps))
-            else:
-                new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = new_lrate
+            new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = new_lrate
 
         # >>>>>>>>>>> inner loop (get data, forward, add loss) begins >>>>>>>>>>>
         # Sample random ray batch
