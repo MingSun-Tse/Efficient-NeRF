@@ -158,8 +158,7 @@ parser.add_argument('--select_pixel_mode', type=str,
                     default='rand_pixel', choices=['rand_pixel', 'rand_patch'])
 parser.add_argument('--freeze_pretrained', action='store_true')
 parser.add_argument('--focal_scale', type=float, default=1.)
-parser.add_argument('--data_mode', type=str, default='images', choices=['images', 'rays', 'images_new', '16x16patches',
-                                                                        '16x16patches_v2', '16x16patches_v3'],
+parser.add_argument('--data_mode', type=str, default='images', choices=['images', 'rays'],
                     help='which data is used in training, sample rays from images or directly load rays')
 parser.add_argument('--rm_existing_data', action='store_true',
                     help='remove existing data when creating data')
