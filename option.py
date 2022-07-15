@@ -120,7 +120,7 @@ parser.add_argument('--cache_ignore', type=str, default='')
 parser.add_argument('--note', type=str, default='')
 parser.add_argument('--resume_ExpID', type=str, default='')
 
-# @mst: related to R2L method
+# R2L related
 parser.add_argument('--model_name', type=str, default='R2L', 
         choices=['nerf', 'nerf_v3.2', 'R2L'])
 parser.add_argument('--N_iters', type=int, default=200000)
@@ -132,31 +132,17 @@ parser.add_argument('--pretrained_ckpt', type=str, default='')
 parser.add_argument('--test_pretrained', action="store_true")
 parser.add_argument('--resume', action="store_true", 
         help='if True, resume the optimizer')
-parser.add_argument('--learn_pts', action="store_true", 
-        help='if True, learn sampling positions')
-parser.add_argument('--teacher_ckpt', type=str, default='',
-        help='path of teacher checkpoint for knowledge distillation. The only indicator for if using the teacher-student paradigm.')
-parser.add_argument('--test_teacher', action="store_true")
 parser.add_argument('--lw_kd', type=float, default=0.001)
 parser.add_argument('--split_layer', type=int, default=-1)
 parser.add_argument('--dropout_layer', type=str, default='')
 parser.add_argument('--dropout_ratio', type=float, default=0.5)
-parser.add_argument('--use_group_conv', action="store_true")
-parser.add_argument('--n_perm_invar', type=int, default=0)
-parser.add_argument('--lw_perm_invar', type=float, default=0.001)
 parser.add_argument('--lr', type=str, default='')
-parser.add_argument('--directly_predict_rgb', action="store_true")
 parser.add_argument('--n_pose_video', type=str, default='40',
         help='num of poses in rendering the video')
 parser.add_argument('--n_pose_kd', type=str, default='100',
         help='num of poses in rendering the video when using KD')
-parser.add_argument('--kd_with_render_pose', action="store_true",
-	help='deprecated args. Will be removed')
 parser.add_argument('--video_tag', type=str, default='')
-parser.add_argument('--kd_with_render_pose_mode', type=str, default='partial_render_pose', choices=['partial_render_pose', 'all_render_pose'],
-        help='all_render_pose: all the training poses are generated novel poses, not from training images')
 parser.add_argument('--video_poses_perturb', action="store_true")
-parser.add_argument('--kd_poses_update', type=str, default='once')
 parser.add_argument('--datadir_kd', type=str, default='')
 parser.add_argument('--create_data_chunk', type=int, default=100)
 parser.add_argument('--create_data', type=str, default='spiral_evenly_spaced')
@@ -164,9 +150,7 @@ parser.add_argument('--no_rand_focal', dest='use_rand_focal', action='store_fals
 parser.add_argument('--max_save', type=int, default=40000)
 parser.add_argument('--i_update_data', type=int, default=1000000000,
         help='interval of updating training data (changing pseudo data)')
-parser.add_argument('--pseudo_ratio_schedule', type=str, default='0:0.2,500000:0.9')
 parser.add_argument('--pseudo_ratio', type=float, default=-1.)
-parser.add_argument('--init', type=str, default='default', choices=['default', 'orth'])
 parser.add_argument('--trans_origin', type=str, default='')
 parser.add_argument('--select_pixel_mode', type=str, default='rand_pixel', choices=['rand_pixel', 'rand_patch'])
 parser.add_argument('--freeze_pretrained', action='store_true')
@@ -181,7 +165,6 @@ parser.add_argument('--hard_ratio', type=str, default='',
         help='hard rays ratio in a batch; seperated by comma')
 parser.add_argument('--hard_mul', type=float, default=1,
         help='hard_mul * batch_size is the size of hard ray pool')
-parser.add_argument('--previous_layers', type=str, default='')
 parser.add_argument('--use_residual', action='store_true')
 parser.add_argument('--linear_tail', action='store_true')
 parser.add_argument('--layerwise_netwidths', type=str, default='')
@@ -191,21 +174,13 @@ parser.add_argument('--render_iters', type=int, default=1,
 parser.add_argument('--convert_to_onnx', action='store_true')
 parser.add_argument('--benchmark', action='store_true',
         help='check inference speed (time of rendering a frame) with a trained model')
-parser.add_argument('--rand_crop_size', type=int, default=-1)
-parser.add_argument('--share_pixels', type=int, default=9)
-parser.add_argument('--scale', type=int, default=3,
-        help='predict multiple pixels')
-parser.add_argument('--dim_dir', type=int, default=3)
-parser.add_argument('--dim_rgb', type=int, default=3)
 parser.add_argument('--use_bn', action='store_true')
-parser.add_argument('--diverge_depth', type=int, default=6)
 parser.add_argument('--shuffle_input', action='store_true')
 parser.add_argument('--kernel_size', type=int, default=1)
 parser.add_argument('--padding', type=int, default=0)
 parser.add_argument('--body_arch', type=str, default='conv', choices=['conv', 'resblock'])
 parser.add_argument('--lw_rgb', type=float, default=1)
 parser.add_argument('--lw_rgb1', type=float, default=1)
-parser.add_argument('--iter_size', type=int, default=1)
 parser.add_argument('--act', type=str, default='relu', choices=['relu', 'lrelu'], help='main activation func in a network')
 parser.add_argument('--warmup_lr', type=str, default='')
 parser.add_argument('--lpips_net', type=str, default='alex')
@@ -216,13 +191,11 @@ parser.add_argument('--lw_depth', type=float, default=0.1)
 parser.add_argument('--save_intermediate_models', action='store_true')
 parser.add_argument('--plucker', action='store_true')
 
-# unet related
-parser.add_argument('--unet.ON', action='store_true')
-parser.add_argument('--unet.base_n_filters', type=int, default=64)
-parser.add_argument('--unet.n_downsample', type=int, default=4)
-parser.add_argument('--unet.last_act', type=str, default='linear', choices=['linear', 'sigmoid', 'relu'])
+# Create data
+parser.add_argument('--teacher_ckpt', type=str)
+parser.add_argument('--test_teacher', action='store_true')
 
-# try related
+# Try related features
 parser.add_argument('--trial.ON', action='store_true')
 parser.add_argument('--trial.body_arch', type=str, default='mlp', choices=['mlp', 'resmlp'])
 parser.add_argument('--trial.res_scale', type=float, default=1.)
@@ -232,7 +205,6 @@ parser.add_argument('--trial.outact', default='none', choices=['none', 'relu', '
 parser.add_argument('--trial.n_block', type=int, default=-1, help='num of block in network body')
 parser.add_argument('--trial.near', type=float, default=-1)
 parser.add_argument('--trial.far', type=float, default=-1)
-
 
 args = parser.parse_args()
 
