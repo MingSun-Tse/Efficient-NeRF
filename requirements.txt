@@ -6,7 +6,7 @@ tqdm==4.61.2
 ConfigArgParse==1.5.1
 dill==0.3.4
 ipdb==0.13.9
-numpy==1.21.0
+numpy==1.22
 ptflops==0.6.6
 imageio==2.9.0
 opencv_python==4.5.3.56
