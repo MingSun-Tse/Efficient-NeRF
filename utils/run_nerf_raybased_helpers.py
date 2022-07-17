@@ -345,7 +345,7 @@ def parse_expid_iter(path):
 
 
 def load_weights(model, ckpt_path, key):
-    from utils.utils import check_path
+    from smilelogging.utils import check_path
     from collections import OrderedDict
     ckpt_path = check_path(ckpt_path)
     ckpt = torch.load(ckpt_path)

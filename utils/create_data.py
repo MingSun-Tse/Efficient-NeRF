@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from model.nerf_raybased import NeRF
-from run_nerf_raybased_helpers import to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights, sample_pdf, ndc_rays, get_rays, get_embedder
+from utils.run_nerf_raybased_helpers import to_tensor, to_array, mse2psnr, to8b, img2mse, load_weights, sample_pdf, ndc_rays, get_rays, get_embedder
 
 from dataset.load_llff import load_llff_data
 from dataset.load_deepvoxels import load_dv_data
@@ -18,13 +18,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
 DEBUG = False
 
-# set up logging directories -------
-from utils.logger import Logger
-from utils.utils import Timer
+# Set up logging directories -------
+from smilelogging import Logger
+from smilelogging.utils import Timer
 from option import args
 
 logger = Logger(args)
-print = logger.log_printer.logprint
 accprint = logger.log_printer.accprint
 netprint = logger.log_printer.netprint
 ExpID = logger.ExpID
