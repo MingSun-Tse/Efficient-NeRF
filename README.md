@@ -84,7 +84,7 @@ If you are using the downloaded teachers, please use this snippet:
 CUDA_VISIBLE_DEVICES=0 python utils/create_data.py --create_data rand --config configs/lego.txt --teacher_ckpt NeRF_Blender_Models/lego.tar --n_pose_kd 10000 --datadir_kd data/nerf_synthetic/lego:data/nerf_synthetic/lego_pseudo_images10k --screen --cache_ignore data,__pycache__,torchsearchsorted,imgs --project NeRF__blender_lego__create_pseudo
 ```
 
-The pseudo data will be saved in `data/nerf_synthetic/lego_pseudo_images10k`. Every 4096 rays are saved in one .npy file. For 10k images (400x400 resoltuion), there will be 309600 .npy files.
+The pseudo data will be saved in `data/nerf_synthetic/lego_pseudo_images10k`. Every 4096 rays are saved in one .npy file. For 10k images (400x400 resoltuion), there will be 309600 .npy files. On our RTX 2080Ti GPU, rendering 1 image with NeRF takes around 8s, so 10k images would take like 22 hrs. If you want to try our method faster, **you may download the [lego data]() we synthesized** (around 500 images, 2.5GB in total). This would lead to degenrated quality, but based on our ablation study (see Fig. 6 in our paper), it works farily good.
 
 
 #### Step 3. 
@@ -95,10 +95,18 @@ CUDA_VISIBLE_DEVICES=0 python run_nerf_raybased.py --model_name R2L --config con
 
 #### Step 4. 
 Convert original real data (images) to our `.npy` format:
+For blender data:
 ```bash
 python utils/convert_original_data_to_rays_blender.py --splits train --datadir data/nerf_synthetic/lego
 ```
 The converted data will be saved in `data/nerf_synthetic/lego_real_train`.
+
+For llff data:
+```bash
+python utils/convert_original_data_to_rays_llff.py --splits train --datadir data/nerf_llff_data/flower
+```
+The converted data will be saved in `data/nerf_llff_data/room_real_train`.
+
 
 #### Step 5. 
 Finetune the R2L model in Step 3 on the data in Step 4:

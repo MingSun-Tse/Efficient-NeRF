@@ -1,12 +1,20 @@
-import os, time, numpy as np, sys, configargparse
+import os
+import time
+import numpy as np
+import sys
+import configargparse
 import torch
 import imageio
 import json
 import cv2
 
-to_tensor = lambda x: x.to('cpu') if isinstance(
+
+def to_tensor(x): return x.to('cpu') if isinstance(
     x, torch.Tensor) else torch.Tensor(x).to('cpu')
-to_array = lambda x: x if isinstance(x, np.ndarray) else x.data.cpu().numpy()
+
+
+def to_array(x): return x if isinstance(
+    x, np.ndarray) else x.data.cpu().numpy()
 
 
 def tile(a, dim, n_tile):
@@ -84,7 +92,7 @@ Example:
         python convert_original_data_to_rays_blender.py --splits train --datadir data/nerf_synthetic/lego
 """
 
-############################################## Input Args
+# Input Args
 white_bkgd = True  # default setting for the synthetic dataset in NeRF
 split_size = 4096  # manually set
 ##############################################

@@ -1,12 +1,24 @@
-import os, time, numpy as np, sys, configargparse
+import os
+import time
+import sys
+sys.path.insert(0, './')
+
+import numpy as np
+import configargparse
 import torch
 import imageio
 import json
 import cv2
 
-to_tensor = lambda x: x.to('cpu') if isinstance(
+from dataset.load_llff import load_llff_data
+
+
+def to_tensor(x): return x.to('cpu') if isinstance(
     x, torch.Tensor) else torch.Tensor(x).to('cpu')
-to_array = lambda x: x if isinstance(x, np.ndarray) else x.data.cpu().numpy()
+
+
+def to_array(x): return x if isinstance(
+    x, np.ndarray) else x.data.cpu().numpy()
 
 
 def get_rays(H, W, focal, c2w, trans_origin='', focal_scale=1):
@@ -32,10 +44,10 @@ def get_rays(H, W, focal, c2w, trans_origin='', focal_scale=1):
 r"""Usage:
         python <this_file> --splits <train_val_splits> --datadir <dir_path_to_original_data>
 Example: 
-        python convert_original_data_to_rays.py --splits train --datadir data/nerf_synthetic/lego
+        python utils/convert_original_data_to_rays_llff.py --splits train --datadir data/nerf_llff_data/flower
 """
 
-############################################## Input Args
+# Input Args
 half_res = True  # default setting, corresponding to 400x400 images in the synthetic dataset in NeRF
 white_bkgd = True  # default setting for the synthetic dataset in NeRF
 split_size = 4096  # manually set
@@ -57,11 +69,10 @@ splits = args.splits.split(',')
 datadir = args.datadir
 prefix = ''.join(splits)
 suffix = sys.argv[3] if len(sys.argv) == 4 else ''
-savedir = f'{os.path.normpath(datadir)}_{prefix}_Rand_Origins_Dirs_{split_size}RaysPerNpy{args.suffix}'
+savedir = f'{os.path.normpath(datadir)}_real_{prefix}{args.suffix}'
 os.makedirs(savedir, exist_ok=True)
 
 # Load all images
-from load_llff import load_llff_data
 
 images, poses, *_ = load_llff_data(args.datadir,
                                    factor=8,
