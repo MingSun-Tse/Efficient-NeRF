@@ -19,8 +19,8 @@ from utils.flip_loss import FLIP
 from utils.run_nerf_raybased_helpers import sample_pdf, ndc_rays, get_rays, get_embedder, get_rays_np
 from utils.run_nerf_raybased_helpers import parse_expid_iter, to_tensor, to_array, mse2psnr, to8b, img2mse
 from utils.run_nerf_raybased_helpers import load_weights_v2, get_selected_coords, undataparallel
-from utils.logger import Logger
-from utils.utils import Timer, LossLine, get_n_params_, get_n_flops_, AverageMeter, ProgressMeter
+from smilelogging import Logger
+from smilelogging.utils import Timer, LossLine, get_n_params_, get_n_flops_, AverageMeter, ProgressMeter
 from option import args
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -28,9 +28,8 @@ np.random.seed(0)
 DEBUG = False
 
 # ---------------------------------
-# Set up logging directories (TODO-@mst: Use smilelogging)
+# Set up logging directories
 logger = Logger(args)
-print = logger.log_printer.logprint
 accprint = logger.log_printer.accprint
 netprint = logger.log_printer.netprint
 ExpID = logger.ExpID

@@ -1,11 +1,8 @@
 from random import choice
-
 from numpy.random import default_rng
-import configargparse
+from smilelogging.utils import check_path, strdict_to_dict, update_args
+from smilelogging import argparser as parser
 
-from utils.utils import check_path, strdict_to_dict, update_args
-
-parser = configargparse.ArgumentParser()
 parser.add_argument('--config', is_config_file=True,
                     help='config file path')
 parser.add_argument("--expname", type=str,
@@ -113,14 +110,6 @@ parser.add_argument("--i_testset", type=int, default=2000,
                     help='frequency of testset saving')
 parser.add_argument("--i_video",   type=int, default=10000,
                     help='frequency of render_poses video saving')
-
-# @mst: routine params
-parser.add_argument('--project_name', type=str, default="")
-parser.add_argument('--debug', action="store_true")
-parser.add_argument('--screen_print', action="store_true")
-parser.add_argument('--cache_ignore', type=str, default='')
-parser.add_argument('--note', type=str, default='')
-parser.add_argument('--resume_ExpID', type=str, default='')
 
 # R2L related
 parser.add_argument('--model_name', type=str, default='R2L',
