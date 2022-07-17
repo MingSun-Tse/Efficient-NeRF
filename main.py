@@ -35,7 +35,9 @@ netprint = logger.log_printer.netprint
 ExpID = logger.ExpID
 flip = FLIP()
 
+
 class MyDataParallel(torch.nn.DataParallel):
+
     def __getattr__(self, name):
         try:
             return super().__getattr__(name)
