@@ -5,7 +5,7 @@ import json
 import torch.nn.functional as F
 import cv2
 from torch.utils.data import Dataset
-from run_nerf_raybased_helpers import to_tensor, to8b, to_array, visualize_3d
+from utils.run_nerf_raybased_helpers import to_tensor, to8b, to_array, visualize_3d
 
 trans_t = lambda t: torch.Tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, t],
                                   [0, 0, 0, 1]]).float()
