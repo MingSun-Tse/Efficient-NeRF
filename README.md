@@ -22,7 +22,7 @@ This repository is for the new neral light field (NeLF) method introduced in the
 
 
 ## Reproducing Our Results
-Below we only show the example of scene `lego`. You may test on other scenes simply by changing all the `lego` word segments to other scene names. Scripts have been doubled-checked. You should be able to **run them simply by copy-paste**.  
+Below we only show the example of scene `lego`. You may test on other scenes simply by changing all the `lego` word segment to other scene names. Scripts have been doubled-checked. You should be able to **run them simply by copy-paste**.  
 
 ### 0. Download the code
 ```
@@ -95,6 +95,11 @@ The data will be extracted under `data/nerf_synthetic/lego_pseudo_images500`. Us
 Train R2L model on the synthetic data:
 ```bash
 CUDA_VISIBLE_DEVICES=0 python main.py --model_name R2L --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/lego_pseudo_images10k --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --trial.ON --trial.body_arch resmlp --num_worker 8 --warmup_lr 0.0001,200 --cache_ignore data,__pycache__,torchsearchsorted,imgs --screen --project R2L__blender_lego
+```
+
+If you are using the downloaded `lego_pseudo_images500` data, please use this snippet:
+```bash
+CUDA_VISIBLE_DEVICES=0 python main.py --model_name R2L --config configs/lego_noview.txt --n_sample_per_ray 16 --netwidth 256 --netdepth 88 --datadir_kd data/nerf_synthetic/lego_pseudo_images500 --n_pose_video 20,1,1 --N_iters 1200000 --N_rand 20 --data_mode rays --hard_ratio 0.2 --hard_mul 20 --use_residual --trial.ON --trial.body_arch resmlp --num_worker 8 --warmup_lr 0.0001,200 --cache_ignore data,__pycache__,torchsearchsorted,imgs --screen --project R2L__blender_lego
 ```
 
 #### Step 4. 
