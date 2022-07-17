@@ -9,12 +9,13 @@ import json
 import cv2
 
 
-def to_tensor(x): return x.to('cpu') if isinstance(
-    x, torch.Tensor) else torch.Tensor(x).to('cpu')
+def to_tensor(x):
+    return x.to('cpu') if isinstance(
+        x, torch.Tensor) else torch.Tensor(x).to('cpu')
 
 
-def to_array(x): return x if isinstance(
-    x, np.ndarray) else x.data.cpu().numpy()
+def to_array(x):
+    return x if isinstance(x, np.ndarray) else x.data.cpu().numpy()
 
 
 def tile(a, dim, n_tile):

@@ -1,6 +1,7 @@
 import os
 import time
 import sys
+
 sys.path.insert(0, './')
 
 import numpy as np
@@ -13,12 +14,13 @@ import cv2
 from dataset.load_llff import load_llff_data
 
 
-def to_tensor(x): return x.to('cpu') if isinstance(
-    x, torch.Tensor) else torch.Tensor(x).to('cpu')
+def to_tensor(x):
+    return x.to('cpu') if isinstance(
+        x, torch.Tensor) else torch.Tensor(x).to('cpu')
 
 
-def to_array(x): return x if isinstance(
-    x, np.ndarray) else x.data.cpu().numpy()
+def to_array(x):
+    return x if isinstance(x, np.ndarray) else x.data.cpu().numpy()
 
 
 def get_rays(H, W, focal, c2w, trans_origin='', focal_scale=1):
