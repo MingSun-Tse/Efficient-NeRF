@@ -30,8 +30,8 @@ DEBUG = False
 # ---------------------------------
 # Set up logging directories
 logger = Logger(args)
-accprint = logger.log_printer.accprint
-netprint = logger.log_printer.netprint
+accprint = lambda x: print(x, acc=True)
+netprint = lambda x: print(x, unprefix=True)
 ExpID = logger.ExpID
 flip = FLIP()
 

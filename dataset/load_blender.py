@@ -100,6 +100,9 @@ def load_blender_data(basedir,
     xyzs = [(poses[:, 0, 2], poses[:, 1, 2], poses[:, 2, 2]),
             (render_poses[:, 0, 2], render_poses[:, 1, 2], render_poses[:, 2,
                                                                         2])]
+    print(poses[10, :, 2], poses[10, :, 3])
+    print(render_poses[10, :, 2], render_poses[10, :, 3])
+    exit()
     visualize_3d(xyzs=xyzs, savepath=savepath, cmaps=cmaps)
     # --
 
