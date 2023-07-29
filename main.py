@@ -30,14 +30,13 @@ DEBUG = False
 # ---------------------------------
 # Set up logging directories
 logger = Logger(args)
-accprint = lambda x: print(x, acc=True)
-netprint = lambda x: print(x, unprefix=True)
+accprint = lambda x: logger.print(x, acc=True)
+netprint = lambda x: logger.print(x, unprefix=True)
 ExpID = logger.ExpID
 flip = FLIP()
 
 
 class MyDataParallel(torch.nn.DataParallel):
-
     def __getattr__(self, name):
         try:
             return super().__getattr__(name)
@@ -46,7 +45,7 @@ class MyDataParallel(torch.nn.DataParallel):
 
 
 # Update ssim and lpips metric functions
-ssim = lambda img, ref: ssim_(torch.unsqueeze(img, 0), torch.unsqueeze(ref, 0))
+ssim = lambda img, ref: ssim_(torch.unsqueeze(img, 0), torch.unsqueeze(ref, 0))  # Note this SSIM fn demands [N, C, H, W] data layout
 lpips = lpips_.LPIPS(net=args.lpips_net).to(device)
 # ---------------------------------
 
@@ -254,7 +253,8 @@ def render_path(render_poses,
                 if gt_imgs is not None:
                     errors += [(rgb - gt_imgs[i][:H_, :W_, :]).abs()]
                     psnrs += [mse2psnr(img2mse(rgb, gt_imgs[i, :H_, :W_]))]
-                    ssims += [ssim(rgb, gt_imgs[i, :H_, :W_])]
+                    ssims += [ssim(rgb.permute(2, 0, 1), 
+                                   gt_imgs[i, :H_, :W_].permute(2, 0, 1))] # to [C, H, W] layout
 
                 if savedir is not None:
                     filename = os.path.join(savedir, '{:03d}.png'.format(i))
@@ -333,7 +333,8 @@ def render_path(render_poses,
             if gt_imgs is not None:
                 errors += [(rgb - gt_imgs[i][:H_, :W_, :]).abs()]
                 psnrs += [mse2psnr(img2mse(rgb, gt_imgs[i, :H_, :W_]))]
-                ssims += [ssim(rgb, gt_imgs[i, :H_, :W_])]
+                ssims += [ssim(rgb.permute(2, 0, 1),
+                               gt_imgs[i, :H_, :W_].permute(2, 0, 1))] # to [C, H, W] layout
 
             if savedir is not None:
                 filename = os.path.join(savedir, '{:03d}.png'.format(i))
@@ -1048,7 +1049,7 @@ def train():
 
     # @mst: use dataloader for training
     kd_poses = None
-    if args.datadir_kd:
+    if args.datadir_kd and not args.render_only:
         global datadir_kd
         datadir_kd = args.datadir_kd.split(
             ':')[1] if ':' in args.datadir_kd else args.datadir_kd
